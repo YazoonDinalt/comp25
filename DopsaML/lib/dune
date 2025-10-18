@@ -1,0 +1,18 @@
+(library
+ (name DopsaML_lib)
+ (public_name DopsaML.Lib)
+ (modules
+  Ast
+  Parser)
+ (libraries base angstrom)
+ (preprocess
+  (pps ppx_expect ppx_deriving.show ppx_deriving.eq))
+ (instrumentation
+  (backend bisect_ppx))
+ (inline_tests))
+
+; (rule
+;  (targets runtime.so)
+;  (deps runtime.c)
+;  (action
+;   (run gcc -fPIC -shared %{deps} -o %{targets})))
