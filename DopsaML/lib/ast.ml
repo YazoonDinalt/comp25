@@ -1,4 +1,4 @@
-(** Copyright 2025-2026, Vitaliy Dyachkov, *)
+(** Copyright 2025-2026, Vitaliy Dyachkov, Ruslan Nafikov*)
 
 (** SPDX-License-Identifier: LGPL-3.0-or-later *)
 
