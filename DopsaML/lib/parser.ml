@@ -80,36 +80,36 @@ let chainl1 e op =
 
 let parse_bool =
   parse_white_space
-  *> ((fun _ -> CBool true)
+  *> ((fun _ -> ConstBool true)
       <$> string "true"
-      <|> ((fun _ -> CBool false) <$> string "false"))
+      <|> ((fun _ -> ConstBool false) <$> string "false"))
 ;;
 
 let parse_uint =
   let pd = parse_white_space *> take_while1 is_digit in
-  lift (fun digit -> CInt (Int.of_string @@ digit)) pd
+  lift (fun digit -> ConstInt (Int.of_string @@ digit)) pd
 ;;
 
 let parse_int =
   let ps = token (option "" (stoken "-")) in
   let pd = take_while1 is_digit in
-  lift2 (fun sign digit -> CInt (Int.of_string @@ sign ^ digit)) ps pd
+  lift2 (fun sign digit -> ConstInt (Int.of_string @@ sign ^ digit)) ps pd
 ;;
 
-let parse_nil = parse_white_space *> ((fun _ -> CNil) <$> string "[]")
+let parse_nil = parse_white_space *> ((fun _ -> ConstNil) <$> string "[]")
 
 (* Var parsers *)
-let constr_type = (fun _ -> TInt) <$> string "int" <|> ((fun _ -> TBool) <$> string "bool")
+let constr_type = (fun _ -> TypeInt) <$> string "int" <|> ((fun _ -> TypeBool) <$> string "bool")
 let parse_arrow = parse_empty @@ stoken "->"
 
 let parse_types =
   fix (fun next ->
-    lift3 (fun t1 _ t2 -> TArrow (t1, t2)) constr_type parse_arrow next <|> constr_type)
+    lift3 (fun t1 _ t2 -> TypeArrow (t1, t2)) constr_type parse_arrow next <|> constr_type)
 ;;
 
 let parse_type =
   parse_white_space *> char ':' *> parse_white_space *> parse_types
-  <|> ((fun _ -> TUnknown) <$> string "")
+  <|> ((fun _ -> TypeUnknown) <$> string "")
 ;;
 
 let check_var cond =
@@ -160,30 +160,30 @@ let parse_pvar =
   @@ (lift
         (fun a ->
           if String.( <> ) a "_"
-          then PVar (a, TArrow (TInt, TArrow (TInt, TInt)))
-          else PWild)
+          then PatVar (a, TypeArrow (TypeInt, TypeArrow (TypeInt, TypeInt)))
+          else PatWild)
         parse_rename
       <|> lift2
-            (fun a b -> if String.( <> ) a "_" then PVar (a, b) else PWild)
+            (fun a b -> if String.( <> ) a "_" then PatVar (a, b) else PatWild)
             parse_var
             parse_type)
 ;;
 
-let parse_pconst =
-  (fun v -> PConst v) <$> choice [ parse_uint; parse_int; parse_bool; parse_nil ]
+let parse_PatConst =
+  (fun v -> PatConst v) <$> choice [ parse_uint; parse_int; parse_bool; parse_nil ]
 ;;
 
-let parse_wild = (fun _ -> PWild) <$> stoken "_"
+let parse_wild = (fun _ -> PatWild) <$> stoken "_"
 
 let parse_tuple parser =
-  lift2 (fun a b -> PTuple (a :: b)) (token parser) (many1 (stoken "," *> parser))
+  lift2 (fun a b -> PatTuple (a :: b)) (token parser) (many1 (stoken "," *> parser))
 ;;
 
 let rec constr_con = function
-  | [] -> PConst CNil
+  | [] -> PatConst ConstNil
   | hd :: [] -> hd
-  | [ f; s ] -> PCon (f, s)
-  | hd :: tl -> PCon (hd, constr_con tl)
+  | [ f; s ] -> PatCon (f, s)
+  | hd :: tl -> PatCon (hd, constr_con tl)
 ;;
 
 let parse_con c =
@@ -200,7 +200,7 @@ let parse_con_2 parser constructor =
 let parse_pattern =
   fix
   @@ fun pack ->
-  let value = parse_pvar <|> parse_pconst in
+  let value = parse_pvar <|> parse_PatConst in
   let tuple = brackets @@ parse_tuple (value <|> pack) in
   let con =
     parse_con (tuple <|> parse_con_2 pack constr_con <|> value)
@@ -209,26 +209,26 @@ let parse_pattern =
   choice [ con; tuple; value ]
 ;;
 
-(** Expression type *)
+(** Exp type *)
 
-(* EConst *)
+(* ExpConst *)
 
-let parse_econst = (fun v -> EConst v) <$> choice [ parse_uint; parse_bool ]
+let parse_ExpConst = (fun v -> ExpConst v) <$> choice [ parse_uint; parse_bool ]
 
-let parse_econst_int =
-  (fun v -> EConst v) <$> choice [ parse_uint; parse_int; parse_bool ]
+let parse_ExpConst_int =
+  (fun v -> ExpConst v) <$> choice [ parse_uint; parse_int; parse_bool ]
 ;;
 
-(* EVar *)
+(* ExpVar *)
 
-let parse_evar =
-  brackets @@ lift2 (fun a b -> EVar (a, b)) parse_var parse_type
-  <|> lift (fun a -> EVar (a, TUnknown)) parse_var
+let parse_ExpVar =
+  brackets @@ lift2 (fun a b -> ExpVar (a, b)) parse_var parse_type
+  <|> lift (fun a -> ExpVar (a, TypeUnknown)) parse_var
 ;;
 
-(* EBinaryOp *)
+(* ExpBinaryOp *)
 
-let parse_op char_op op = stoken char_op *> return (fun e1 e2 -> EBinaryOp (op, e1, e2))
+let parse_op char_op op = stoken char_op *> return (fun e1 e2 -> ExpBinaryOp (op, e1, e2))
 let pmulti = parse_op "*" Mul <|> parse_op "/" Div
 let padd = parse_op "+" Add <|> parse_op "-" Sub
 
@@ -237,70 +237,70 @@ let pcomp =
 ;;
 
 let peq = parse_op "==" Eq <|> parse_op "=" Eq <|> parse_op "<>" Neq
-let pconj = parse_op "&&" And
+let patConj = parse_op "&&" And
 let pdisj = parse_op "||" Or
 
-let parse_ebinop x =
+let parse_expbinop x =
   let multi = chainl1 x pmulti in
   let add = chainl1 multi padd in
   let comp = chainl1 add pcomp in
   let eq = chainl1 comp peq in
-  let conj = chainl1 eq pconj in
+  let conj = chainl1 eq patConj in
   chainl1 conj pdisj <* parse_white_space
 ;;
 
-(* EIfElse *)
+(* ExpIfElse *)
 
-let parse_eifelse i expr =
+let parse_ExpIfElse i expr =
   lift3
-    (fun e1 e2 e3 -> EIfElse (e1, e2, e3))
+    (fun e1 e2 e3 -> ExpIfElse (e1, e2, e3))
     (stoken "if" *> i)
     (stoken "then" *> expr)
     (stoken "else" *> expr)
 ;;
 
-(* EFun *)
+(* ExpFun *)
 
-let constr_efun pl e = List.fold_right ~init:e ~f:(fun p e -> EFun (p, e)) pl
+let constr_ExpFun pl e = List.fold_right ~init:e ~f:(fun p e -> ExpFun (p, e)) pl
 let parse_fun_args = fix @@ fun p -> many1 parse_pattern <|> brackets p
 
-let parse_efun expr =
+let parse_ExpFun expr =
   brackets_or_not
-  @@ lift2 constr_efun (stoken "fun" *> parse_fun_args) (stoken "->" *> expr)
+  @@ lift2 constr_ExpFun (stoken "fun" *> parse_fun_args) (stoken "->" *> expr)
 ;;
 
-(* EApp *)
+(* ExpApp *)
 
-let parse_eapp e1 e2 =
+let parse_ExpApp e1 e2 =
   (* Парсим функцию и аргументы *)
-  parse_evar
+  parse_ExpVar
   <|> e1
   >>= fun f ->
-  many1 (parse_evar <|> e2)
+  many1 (parse_ExpVar <|> e2)
   >>= fun args ->
   (* Строим выражение без типов *)
   let app_without_type =
     List.fold_left
-      ~f:(fun f_acc arg -> EApp (f_acc, arg, TUnknown))
-        (* Используем TUnknown как временный тип *)
+      ~f:(fun f_acc arg -> ExpApp (f_acc, arg, TypeUnknown))
+        (* Используем TypeUnknown как временный тип *)
       ~init:f
       args
   in
   (* Парсим тип для внешней аппликации *)
   parse_type
   >>= fun ty ->
-  (* Заменяем TUnknown на вычисленный тип для внешней аппликации *)
+  (* Заменяем TypeUnknown на вычисленный тип для внешней аппликации *)
   let replace_outer_type expr new_ty =
     match expr with
-    | EApp (e1, e2, TUnknown) ->
-      EApp (e1, e2, new_ty) (* Заменяем тип только для внешней аппликации *)
-    | EApp (e1, e2, _) -> EApp (e1, e2, TUnknown)
+    | ExpApp (e1, e2, TypeUnknown) ->
+      ExpApp (e1, e2, new_ty) (* Заменяем тип только для внешней аппликации *)
+    | ExpApp (e1, e2, _) -> ExpApp (e1, e2, TypeUnknown)
     | _ -> expr
   in
   return (replace_outer_type app_without_type ty)
 ;;
 
-(* ELetIn *)
+(* ExpLetIn *)
 
 let parse_rec =
   option "false" (stoken1 "rec ")
@@ -309,34 +309,34 @@ let parse_rec =
 
 let parse_name = parse_rename <|> parse_var
 
-let parse_eletin expr =
+let parse_ExpLetIn expr =
   let lift5 f p1 p2 p3 p4 p5 = f <$> p1 <*> p2 <*> p3 <*> p4 <*> p5 in
   lift5
     (fun is_rec name args expr1 expr2 ->
-      let expr = constr_efun args expr1 in
-      ELetIn (is_rec, name, expr, expr2))
+      let expr = constr_ExpFun args expr1 in
+      ExpLetIn (is_rec, name, expr, expr2))
     (parse_white_space *> stoken "let" *> parse_rec)
     parse_name
     (many parse_pattern)
     (stoken "=" *> expr)
     (stoken "in" *> expr)
   <|> lift3
-        (fun names expr1 expr2 -> ELetPatIn (names, expr1, expr2))
+        (fun names expr1 expr2 -> ExpLetPatIn (names, expr1, expr2))
         (parse_white_space *> stoken "let" *> parse_pattern)
         (stoken "=" *> expr)
         (stoken "in" *> expr)
 ;;
 
-(* EList *)
+(* ExpList *)
 
 let parse_cons_semicolon_expr parser constructor =
   constructor <$> (stoken "[" *> sep_by (stoken ";") parser <* stoken "]")
 ;;
 
 let rec create_cons_sc = function
-  | [] -> EConst CNil
-  | hd :: [] when equal_expression hd (EConst CNil) -> EConst CNil
-  | hd :: tl -> EList (hd, create_cons_sc tl)
+  | [] -> ExpConst ConstNil
+  | hd :: [] when equal_expression hd (ExpConst ConstNil) -> ExpConst ConstNil
+  | hd :: tl -> ExpList (hd, create_cons_sc tl)
 ;;
 
 let parse_econ c =
@@ -346,116 +346,116 @@ let parse_econ c =
     (sep_by1 (parse_white_space *> stoken "::") c)
 ;;
 
-(* ETuple *)
+(* ExpTuple *)
 
 let parse_tuple_expr parser =
   brackets
   @@ lift2
-       (fun a b -> ETuple (a :: b))
+       (fun a b -> ExpTuple (a :: b))
        (parser <* stoken ",")
        (sep_by1 (stoken ",") parser)
 ;;
 
 (* Expression parsers *)
 
-let parse_expression =
+let parse_Exp =
   fix
   @@ fun pack ->
-  let econst = parse_econst in
-  let evar = parse_evar in
+  let expconst = parse_ExpConst in
+  let expvar = parse_ExpVar in
   let tuples =
     parse_tuple_expr
-      (econst
-       <|> evar
+      (expconst
+       <|> expvar
        <|> parse_tuple_expr pack
        <|> parse_cons_semicolon_expr pack create_cons_sc)
   in
   let parse_if =
-    parse_ebinop pack
-    <|> brackets (parse_ebinop pack <|> parse_eletin pack <|> parse_eapp pack pack)
+    parse_expbinop pack
+    <|> brackets (parse_expbinop pack <|> parse_ExpLetIn pack <|> parse_ExpApp pack pack)
   in
   let expression pack =
-    parse_ebinop pack
-    <|> parse_eapp pack pack
-    <|> brackets_or_not @@ parse_eifelse parse_if pack
-    <|> parse_efun pack
-    <|> parse_eletin pack
-    <|> brackets @@ choice [ tuples; parse_ebinop pack ]
-    <|> evar
-    <|> econst
+    parse_expbinop pack
+    <|> parse_ExpApp pack pack
+    <|> brackets_or_not @@ parse_ExpIfElse parse_if pack
+    <|> parse_ExpFun pack
+    <|> parse_ExpLetIn pack
+    <|> brackets @@ choice [ tuples; parse_expbinop pack ]
+    <|> expvar
+    <|> expconst
     <|> tuples
   in
   let app_left pack =
-    evar
-    <|> (brackets_or_not @@ parse_eifelse parse_if (expression pack)
-         <|> parse_efun pack
-         <|> brackets @@ parse_eapp pack pack
-         <|> parse_eletin pack)
+    expvar
+    <|> (brackets_or_not @@ parse_ExpIfElse parse_if (expression pack)
+         <|> parse_ExpFun pack
+         <|> brackets @@ parse_ExpApp pack pack
+         <|> parse_ExpLetIn pack)
   in
   let app_right pack =
     brackets_or_not
-    @@ (parse_ebinop pack
-        <|> brackets_or_not @@ parse_eifelse parse_if (expression pack)
-        <|> parse_eapp pack pack
-        <|> parse_efun pack
-        <|> parse_eletin pack)
+    @@ (parse_expbinop pack
+        <|> brackets_or_not @@ parse_ExpIfElse parse_if (expression pack)
+        <|> parse_ExpApp pack pack
+        <|> parse_ExpFun pack
+        <|> parse_ExpLetIn pack)
     <|> tuples
-    <|> evar
-    <|> econst
+    <|> expvar
+    <|> expconst
   in
-  let eapp = brackets_or_not @@ parse_eapp (app_left pack) (app_right pack) in
-  let eapp_int =
+  let exapp = brackets_or_not @@ parse_ExpApp (app_left pack) (app_right pack) in
+  let exapp_int =
     brackets_or_not
-    @@ parse_eapp
-         (app_left (pack <|> parse_econst_int))
-         (app_right (pack <|> parse_econst_int))
+    @@ parse_ExpApp
+         (app_left (pack <|> parse_ExpConst_int))
+         (app_right (pack <|> parse_ExpConst_int))
   in
-  let elists =
-    parse_econ (eapp <|> evar)
+  let explists =
+    parse_econ (exapp <|> expvar)
     <|> parse_cons_semicolon_expr
-          (eapp
-           <|> econst
-           <|> evar
+          (exapp
+           <|> expconst
+           <|> expvar
            <|> tuples
            <|> parse_cons_semicolon_expr pack create_cons_sc)
           create_cons_sc
   in
-  let eifelse = parse_eifelse parse_if (expression pack) in
-  let efun =
-    brackets_or_not @@ parse_efun @@ parse_ebinop pack
+  let expifelse = parse_ExpIfElse parse_if (expression pack) in
+  let expfun =
+    brackets_or_not @@ parse_ExpFun @@ parse_expbinop pack
     <|> tuples
-    <|> parse_tuple_expr (eapp <|> evar <|> econst)
-    <|> parse_eapp (app_left pack) (app_right pack)
-    <|> brackets_or_not @@ parse_eifelse parse_if (expression pack)
-    <|> parse_efun pack
-    <|> parse_eletin pack
+    <|> parse_tuple_expr (exapp <|> expvar <|> expconst)
+    <|> parse_ExpApp (app_left pack) (app_right pack)
+    <|> brackets_or_not @@ parse_ExpIfElse parse_if (expression pack)
+    <|> parse_ExpFun pack
+    <|> parse_ExpLetIn pack
   in
-  let ebinop =
+  let expbinop =
     brackets_or_not
-    @@ parse_ebinop
-         (parse_eletin pack
-          <|> parse_eapp (app_left pack) (app_right pack)
-          <|> brackets @@ brackets_or_not @@ parse_eifelse parse_if (expression pack)
-          <|> brackets @@ parse_ebinop pack
-          <|> evar
-          <|> econst)
+    @@ parse_expbinop
+         (parse_ExpLetIn pack
+          <|> parse_ExpApp (app_left pack) (app_right pack)
+          <|> brackets @@ brackets_or_not @@ parse_ExpIfElse parse_if (expression pack)
+          <|> brackets @@ parse_expbinop pack
+          <|> expvar
+          <|> expconst)
   in
-  let eletin =
-    parse_eletin (expression pack)
-    <|> brackets @@ parse_eletin pack
-    <|> eifelse
+  let expletin =
+    parse_ExpLetIn (expression pack)
+    <|> brackets @@ parse_ExpLetIn pack
+    <|> expifelse
   in
   choice
-    [ eletin
-    ; eapp
-    ; efun
-    ; elists
-    ; ebinop
-    ; eifelse
+    [ expletin
+    ; exapp
+    ; expfun
+    ; explists
+    ; expbinop
+    ; expifelse
     ; tuples
-    ; evar
-    ; econst
-    ; eapp_int
+    ; expvar
+    ; expconst
+    ; exapp_int
     ]
 ;;
 
@@ -465,7 +465,7 @@ let parse_let parse =
   let parse_single_let =
     lift4
       (fun flag name args body ->
-        let body = constr_efun args body in
+        let body = constr_ExpFun args body in
         flag, name, body)
       parse_rec
       parse_pattern
@@ -475,7 +475,7 @@ let parse_let parse =
   let parse_single_multy_let =
     lift3
       (fun name args body ->
-        let body = constr_efun args body in
+        let body = constr_ExpFun args body in
         name, body)
       parse_pattern
       (parse_white_space *> many (brackets_or_not parse_pattern))
@@ -491,8 +491,8 @@ let parse_let parse =
   >>= fun (r, lets) -> return (Let (r, lets))
 ;;
 
-let expr_main = (fun expr -> Expression expr) <$> parse_expression
-let parse_bindings = parse_let parse_expression <|> expr_main
+let expr_main = (fun expr -> Exp expr) <$> parse_Exp
+let parse_bindings = parse_let parse_Exp <|> expr_main
 let parse_statements = many1 (token parse_bindings <* token (many (stoken ";;")))
 let parse_str p s = parse_string ~consume:All p s
 let parser str = parse_str parse_statements (String.strip str)

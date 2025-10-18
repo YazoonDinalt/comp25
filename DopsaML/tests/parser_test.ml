@@ -1,4 +1,4 @@
-(** Copyright 2024-2025, Perevalov Efim, Ermolovich Anna *)
+(** Copyright 2025-2026, Vitaliy Dyachkov, Ruslan Nafikov*)
 
 (** SPDX-License-Identifier: LGPL-3.0-or-later *)
 
@@ -20,25 +20,25 @@ let start_test parser show input =
 let%expect_test "pattern test" =
   let test = "true" in
   start_test parse_pattern show_pattern test;
-  [%expect {| (PConst (CBool true)) |}]
+  [%expect {| (PatConst (ConstBool true)) |}]
 ;;
 
 let%expect_test "pattern test" =
   let test = "951753" in
   start_test parse_pattern show_pattern test;
-  [%expect {| (PConst (CInt 951753)) |}]
+  [%expect {| (PatConst (ConstInt 951753)) |}]
 ;;
 
 let%expect_test "pattern test" =
   let test = "var" in
   start_test parse_pattern show_pattern test;
-  [%expect {| (PVar ("var", TUnknown)) |}]
+  [%expect {| (PatVar ("var", TypeUnknown)) |}]
 ;;
 
 let%expect_test "pattern test" =
   let test = "(var : int)" in
   start_test parse_pattern show_pattern test;
-  [%expect {| (PVar ("var", TInt)) |}]
+  [%expect {| (PatVar ("var", TypeInt)) |}]
 ;;
 
 let%expect_test "pattern test" =
@@ -46,9 +46,9 @@ let%expect_test "pattern test" =
   start_test parse_pattern show_pattern test;
   [%expect
     {|
-    (PTuple
-       [(PTuple [(PConst (CInt 1)); (PConst (CInt 2))]); (PVar ("a", TInt));
-         (PConst (CBool true))]) |}]
+    (PatTuple
+       [(PatTuple [(PatConst (ConstInt 1)); (PatConst (ConstInt 2))]);
+         (PatVar ("a", TypeInt)); (PatConst (ConstBool true))]) |}]
 ;;
 
 let%expect_test "pattern test" =
@@ -56,11 +56,13 @@ let%expect_test "pattern test" =
   start_test parse_pattern show_pattern test;
   [%expect
     {|
-    (PCon ((PCon ((PConst (CInt 1)), (PVar ("a", TInt)))),
-       (PCon ((PCon ((PConst (CInt 1)), (PConst (CInt 2)))),
-          (PCon (
-             (PTuple [(PConst (CInt 1)); (PConst (CInt 2)); (PConst (CInt 3))]),
-             (PConst (CBool true))))
+    (PatCon ((PatCon ((PatConst (ConstInt 1)), (PatVar ("a", TypeInt)))),
+       (PatCon ((PatCon ((PatConst (ConstInt 1)), (PatConst (ConstInt 2)))),
+          (PatCon (
+             (PatTuple
+                [(PatConst (ConstInt 1)); (PatConst (ConstInt 2));
+                  (PatConst (ConstInt 3))]),
+             (PatConst (ConstBool true))))
           ))
        )) |}]
 ;;
@@ -71,108 +73,118 @@ let%expect_test "pattern test" =
 
 let%expect_test "expression_test" =
   let test = "1" in
-  start_test parse_expression show_expression test;
-  [%expect {| (EConst (CInt 1)) |}]
+  start_test parse_Exp show_expression test;
+  [%expect {| (ExpConst (ConstInt 1)) |}]
 ;;
 
 let%expect_test "expression_test" =
   let test = "false" in
-  start_test parse_expression show_expression test;
-  [%expect {| (EConst (CBool false)) |}]
+  start_test parse_Exp show_expression test;
+  [%expect {| (ExpConst (ConstBool false)) |}]
 ;;
 
 (* EVar *)
 
 let%expect_test "expression_test" =
   let test = "papa" in
-  start_test parse_expression show_expression test;
-  [%expect {| (EVar ("papa", TUnknown)) |}]
+  start_test parse_Exp show_expression test;
+  [%expect {| (ExpVar ("papa", TypeUnknown)) |}]
 ;;
 
 let%expect_test "expression_test" =
   let test = "(papa : int)" in
-  start_test parse_expression show_expression test;
-  [%expect {| (EVar ("papa", TInt)) |}]
+  start_test parse_Exp show_expression test;
+  [%expect {| (ExpVar ("papa", TypeInt)) |}]
 ;;
 
 let%expect_test "expression_test" =
   let test = "([1; ([2; ([3; 4], 5)], 6)], 7)" in
-  start_test parse_expression show_expression test;
+  start_test parse_Exp show_expression test;
   [%expect
     {|
-    (ETuple
-       [(EList ((EConst (CInt 1)),
-           (EList (
-              (ETuple
-                 [(EList ((EConst (CInt 2)),
-                     (EList (
-                        (ETuple
-                           [(EList ((EConst (CInt 3)),
-                               (EList ((EConst (CInt 4)), (EConst CNil)))));
-                             (EConst (CInt 5))]),
-                        (EConst CNil)))
+    (ExpTuple
+       [(ExpList ((ExpConst (ConstInt 1)),
+           (ExpList (
+              (ExpTuple
+                 [(ExpList ((ExpConst (ConstInt 2)),
+                     (ExpList (
+                        (ExpTuple
+                           [(ExpList ((ExpConst (ConstInt 3)),
+                               (ExpList ((ExpConst (ConstInt 4)),
+                                  (ExpConst ConstNil)))
+                               ));
+                             (ExpConst (ConstInt 5))]),
+                        (ExpConst ConstNil)))
                      ));
-                   (EConst (CInt 6))]),
-              (EConst CNil)))
+                   (ExpConst (ConstInt 6))]),
+              (ExpConst ConstNil)))
            ));
-         (EConst (CInt 7))]) |}]
+         (ExpConst (ConstInt 7))]) |}]
 ;;
 
 let%expect_test "expression_test" =
   let test = "[1; 5]" in
-  start_test parse_expression show_expression test;
-  [%expect {| (EList ((EConst (CInt 1)), (EList ((EConst (CInt 5)), (EConst CNil))))) |}]
+  start_test parse_Exp show_expression test;
+  [%expect {|
+    (ExpList ((ExpConst (ConstInt 1)),
+       (ExpList ((ExpConst (ConstInt 5)), (ExpConst ConstNil))))) |}]
 ;;
 
 (* EBinaryOp *)
 
 let%expect_test "expression_test" =
   let test = "1 + (a * 3) - x" in
-  start_test parse_expression show_expression test;
+  start_test parse_Exp show_expression test;
   [%expect
     {|
-    (EBinaryOp (Sub,
-       (EBinaryOp (Add, (EConst (CInt 1)),
-          (EBinaryOp (Mul, (EVar ("a", TUnknown)), (EConst (CInt 3)))))),
-       (EVar ("x", TUnknown)))) |}]
+    (ExpBinaryOp (Sub,
+       (ExpBinaryOp (Add, (ExpConst (ConstInt 1)),
+          (ExpBinaryOp (Mul, (ExpVar ("a", TypeUnknown)), (ExpConst (ConstInt 3))
+             ))
+          )),
+       (ExpVar ("x", TypeUnknown)))) |}]
 ;;
 
 let%expect_test "expression_test" =
   let test = "true || false" in
-  start_test parse_expression show_expression test;
-  [%expect {| (EBinaryOp (Or, (EConst (CBool true)), (EConst (CBool false)))) |}]
+  start_test parse_Exp show_expression test;
+  [%expect {| (ExpBinaryOp (Or, (ExpConst (ConstBool true)), (ExpConst (ConstBool false)))) |}]
 ;;
 
 (* EIfElse *)
 
 let%expect_test "expression_test" =
   let test = "if n = 1 then 1 else 3" in
-  start_test parse_expression show_expression test;
+  start_test parse_Exp show_expression test;
   [%expect
     {|
-    (EIfElse ((EBinaryOp (Eq, (EVar ("n", TUnknown)), (EConst (CInt 1)))),
-       (EConst (CInt 1)), (EConst (CInt 3)))) |}]
+    (ExpIfElse (
+       (ExpBinaryOp (Eq, (ExpVar ("n", TypeUnknown)), (ExpConst (ConstInt 1)))),
+       (ExpConst (ConstInt 1)), (ExpConst (ConstInt 3)))) |}]
 ;;
 
 (* EFun *)
 
 let%expect_test "expression_test" =
   let test = "fun x -> 3 + x" in
-  start_test parse_expression show_expression test;
+  start_test parse_Exp show_expression test;
   [%expect
     {|
-    (EFun ((PVar ("x", TUnknown)),
-       (EBinaryOp (Add, (EConst (CInt 3)), (EVar ("x", TUnknown)))))) |}]
+    (ExpFun ((PatVar ("x", TypeUnknown)),
+       (ExpBinaryOp (Add, (ExpConst (ConstInt 3)), (ExpVar ("x", TypeUnknown))))
+       )) |}]
 ;;
 
 let%expect_test "expression_test" =
   let test = "fun x y -> y + x" in
-  start_test parse_expression show_expression test;
+  start_test parse_Exp show_expression test;
   [%expect
     {|
-    (EFun ((PVar ("x", TUnknown)),
-       (EFun ((PVar ("y", TUnknown)),
-          (EBinaryOp (Add, (EVar ("y", TUnknown)), (EVar ("x", TUnknown))))))
+    (ExpFun ((PatVar ("x", TypeUnknown)),
+       (ExpFun ((PatVar ("y", TypeUnknown)),
+          (ExpBinaryOp (Add, (ExpVar ("y", TypeUnknown)),
+             (ExpVar ("x", TypeUnknown))))
+          ))
        )) |}]
 ;;
 
@@ -180,40 +192,46 @@ let%expect_test "expression_test" =
 
 let%expect_test "expression_test" =
   let test = "is_something yes no" in
-  start_test parse_expression show_expression test;
+  start_test parse_Exp show_expression test;
   [%expect
     {|
-    (EApp (
-       (EApp ((EVar ("is_something", TUnknown)), (EVar ("yes", TUnknown)),
-          TUnknown)),
-       (EVar ("no", TUnknown)), TUnknown)) |}]
+    (ExpApp (
+       (ExpApp ((ExpVar ("is_something", TypeUnknown)),
+          (ExpVar ("yes", TypeUnknown)), TypeUnknown)),
+       (ExpVar ("no", TypeUnknown)), TypeUnknown)) |}]
 ;;
 
 let%expect_test "expression_test" =
   let test = "(fun x -> x + 1) 1" in
-  start_test parse_expression show_expression test;
+  start_test parse_Exp show_expression test;
   [%expect
     {|
-    (EApp (
-       (EFun ((PVar ("x", TUnknown)),
-          (EBinaryOp (Add, (EVar ("x", TUnknown)), (EConst (CInt 1)))))),
-       (EConst (CInt 1)), TUnknown)) |}]
+    (ExpApp (
+       (ExpFun ((PatVar ("x", TypeUnknown)),
+          (ExpBinaryOp (Add, (ExpVar ("x", TypeUnknown)), (ExpConst (ConstInt 1))
+             ))
+          )),
+       (ExpConst (ConstInt 1)), TypeUnknown)) |}]
 ;;
 
 (* ELetIn *)
 
 let%expect_test "expression_test" =
   let test = "let sum a b = a + b in sum 2 3" in
-  start_test parse_expression show_expression test;
+  start_test parse_Exp show_expression test;
   [%expect
     {|
-    (ELetIn (Notrec, "sum",
-       (EFun ((PVar ("a", TUnknown)),
-          (EFun ((PVar ("b", TUnknown)),
-             (EBinaryOp (Add, (EVar ("a", TUnknown)), (EVar ("b", TUnknown))))))
+    (ExpLetIn (Notrec, "sum",
+       (ExpFun ((PatVar ("a", TypeUnknown)),
+          (ExpFun ((PatVar ("b", TypeUnknown)),
+             (ExpBinaryOp (Add, (ExpVar ("a", TypeUnknown)),
+                (ExpVar ("b", TypeUnknown))))
+             ))
           )),
-       (EApp ((EApp ((EVar ("sum", TUnknown)), (EConst (CInt 2)), TUnknown)),
-          (EConst (CInt 3)), TUnknown))
+       (ExpApp (
+          (ExpApp ((ExpVar ("sum", TypeUnknown)), (ExpConst (ConstInt 2)),
+             TypeUnknown)),
+          (ExpConst (ConstInt 3)), TypeUnknown))
        )) |}]
 ;;
 
@@ -221,12 +239,13 @@ let%expect_test "expression_test" =
 
 let%expect_test "expression_test" =
   let test = "[1;2;3;4]" in
-  start_test parse_expression show_expression test;
+  start_test parse_Exp show_expression test;
   [%expect
     {|
-    (EList ((EConst (CInt 1)),
-       (EList ((EConst (CInt 2)),
-          (EList ((EConst (CInt 3)), (EList ((EConst (CInt 4)), (EConst CNil)))))
+    (ExpList ((ExpConst (ConstInt 1)),
+       (ExpList ((ExpConst (ConstInt 2)),
+          (ExpList ((ExpConst (ConstInt 3)),
+             (ExpList ((ExpConst (ConstInt 4)), (ExpConst ConstNil)))))
           ))
        ))
  |}]
@@ -234,12 +253,13 @@ let%expect_test "expression_test" =
 
 let%expect_test "expression_test" =
   let test = "(1,2,3,4,5)" in
-  start_test parse_expression show_expression test;
+  start_test parse_Exp show_expression test;
   [%expect
     {|
-    (ETuple
-       [(EConst (CInt 1)); (EConst (CInt 2)); (EConst (CInt 3));
-         (EConst (CInt 4)); (EConst (CInt 5))])
+    (ExpTuple
+       [(ExpConst (ConstInt 1)); (ExpConst (ConstInt 2));
+         (ExpConst (ConstInt 3)); (ExpConst (ConstInt 4));
+         (ExpConst (ConstInt 5))])
  |}]
 ;;
 
@@ -251,13 +271,15 @@ let%expect_test "bindings_test" =
   [%expect
     {|
     (Let (Notrec,
-       [((PVar ("plusfive", TUnknown)),
-         (EFun ((PVar ("x", TUnknown)),
-            (ELetIn (Notrec, "five",
-               (EFun ((PVar ("a", TUnknown)),
-                  (EBinaryOp (Add, (EVar ("a", TUnknown)), (EConst (CInt 5)))))),
-               (EApp ((EVar ("five", TUnknown)), (EVar ("x", TUnknown)), TUnknown
-                  ))
+       [((PatVar ("plusfive", TypeUnknown)),
+         (ExpFun ((PatVar ("x", TypeUnknown)),
+            (ExpLetIn (Notrec, "five",
+               (ExpFun ((PatVar ("a", TypeUnknown)),
+                  (ExpBinaryOp (Add, (ExpVar ("a", TypeUnknown)),
+                     (ExpConst (ConstInt 5))))
+                  )),
+               (ExpApp ((ExpVar ("five", TypeUnknown)),
+                  (ExpVar ("x", TypeUnknown)), TypeUnknown))
                ))
             )))
          ]
@@ -268,7 +290,7 @@ let%expect_test "bindings_test" =
   let test = "4 + 3" in
   start_test parse_bindings show_bindings test;
   [%expect {|
-    (Expression (EBinaryOp (Add, (EConst (CInt 4)), (EConst (CInt 3))))) |}]
+    (Exp (ExpBinaryOp (Add, (ExpConst (ConstInt 4)), (ExpConst (ConstInt 3))))) |}]
 ;;
 
 let%expect_test "bindings_test" =
@@ -277,10 +299,11 @@ let%expect_test "bindings_test" =
   [%expect
     {|
     (Let (Notrec,
-       [((PVar ("Add", (TArrow (TInt, (TArrow (TInt, TInt)))))),
-         (EFun ((PVar ("x", TUnknown)),
-            (EFun ((PVar ("y", TUnknown)),
-               (EBinaryOp (Sub, (EVar ("x", TUnknown)), (EVar ("y", TUnknown))))
+       [((PatVar ("Add", (TypeArrow (TypeInt, (TypeArrow (TypeInt, TypeInt)))))),
+         (ExpFun ((PatVar ("x", TypeUnknown)),
+            (ExpFun ((PatVar ("y", TypeUnknown)),
+               (ExpBinaryOp (Sub, (ExpVar ("x", TypeUnknown)),
+                  (ExpVar ("y", TypeUnknown))))
                ))
             )))
          ]
@@ -293,10 +316,11 @@ let%expect_test "bindings_test" =
   [%expect
     {|
     (Let (Notrec,
-       [((PVar ("f", TUnknown)),
-         (EFun ((PVar ("x", TInt)),
-            (EFun ((PVar ("y", TInt)),
-               (EBinaryOp (Add, (EVar ("x", TUnknown)), (EVar ("y", TUnknown))))
+       [((PatVar ("f", TypeUnknown)),
+         (ExpFun ((PatVar ("x", TypeInt)),
+            (ExpFun ((PatVar ("y", TypeInt)),
+               (ExpBinaryOp (Add, (ExpVar ("x", TypeUnknown)),
+                  (ExpVar ("y", TypeUnknown))))
                ))
             )))
          ]
@@ -309,11 +333,11 @@ let%expect_test "bindings_test" =
   start_test parse_bindings show_bindings test;
   [%expect
     {|
-    (Expression
-       (EList ((EConst (CInt 1)),
-          (EList ((EConst (CInt 2)),
-             (EList ((EConst (CInt 3)),
-                (EList ((EConst (CInt 4)), (EConst CNil)))))
+    (Exp
+       (ExpList ((ExpConst (ConstInt 1)),
+          (ExpList ((ExpConst (ConstInt 2)),
+             (ExpList ((ExpConst (ConstInt 3)),
+                (ExpList ((ExpConst (ConstInt 4)), (ExpConst ConstNil)))))
              ))
           )))
  |}]
@@ -324,10 +348,11 @@ let%expect_test "bindings_test" =
   start_test parse_bindings show_bindings test;
   [%expect
     {|
-    (Expression
-       (ETuple
-          [(EConst (CInt 1)); (EConst (CInt 2)); (EConst (CInt 3));
-            (EConst (CInt 4)); (EConst (CInt 5))]))
+    (Exp
+       (ExpTuple
+          [(ExpConst (ConstInt 1)); (ExpConst (ConstInt 2));
+            (ExpConst (ConstInt 3)); (ExpConst (ConstInt 4));
+            (ExpConst (ConstInt 5))]))
  |}]
 ;;
 
@@ -337,9 +362,11 @@ let%expect_test "bindings_test" =
   [%expect
     {|
     (Let (Notrec,
-       [((PVar ("f", TUnknown)),
-         (EFun ((PVar ("x", TInt)),
-            (EBinaryOp (Add, (EVar ("x", TUnknown)), (EConst (CInt 4)))))))
+       [((PatVar ("f", TypeUnknown)),
+         (ExpFun ((PatVar ("x", TypeInt)),
+            (ExpBinaryOp (Add, (ExpVar ("x", TypeUnknown)),
+               (ExpConst (ConstInt 4))))
+            )))
          ]
        ))
  |}]
@@ -350,11 +377,13 @@ let%expect_test "bindings_test" =
   start_test parse_bindings show_bindings test;
   [%expect
     {|
-    (Expression
-       (EBinaryOp (Mul,
-          (EBinaryOp (Mul, (EConst (CInt 2)),
-             (EBinaryOp (Add, (EConst (CInt 4)), (EConst (CInt 4)))))),
-          (EConst (CInt 1)))))
+    (Exp
+       (ExpBinaryOp (Mul,
+          (ExpBinaryOp (Mul, (ExpConst (ConstInt 2)),
+             (ExpBinaryOp (Add, (ExpConst (ConstInt 4)), (ExpConst (ConstInt 4))
+                ))
+             )),
+          (ExpConst (ConstInt 1)))))
  |}]
 ;;
 
@@ -369,18 +398,21 @@ let%expect_test "bindings_test" =
   [%expect
     {|
     (Let (Rec,
-       [((PVar ("fib", TUnknown)),
-         (EFun ((PVar ("n", TUnknown)),
-            (EIfElse (
-               (EBinaryOp (Less, (EVar ("n", TUnknown)), (EConst (CInt 1)))),
-               (EConst (CInt 1)),
-               (EBinaryOp (Add,
-                  (EApp ((EVar ("fib", TUnknown)),
-                     (EBinaryOp (Sub, (EVar ("n", TUnknown)), (EConst (CInt 1)))),
-                     TUnknown)),
-                  (EApp ((EVar ("fib", TUnknown)),
-                     (EBinaryOp (Sub, (EVar ("n", TUnknown)), (EConst (CInt 2)))),
-                     TUnknown))
+       [((PatVar ("fib", TypeUnknown)),
+         (ExpFun ((PatVar ("n", TypeUnknown)),
+            (ExpIfElse (
+               (ExpBinaryOp (Less, (ExpVar ("n", TypeUnknown)),
+                  (ExpConst (ConstInt 1)))),
+               (ExpConst (ConstInt 1)),
+               (ExpBinaryOp (Add,
+                  (ExpApp ((ExpVar ("fib", TypeUnknown)),
+                     (ExpBinaryOp (Sub, (ExpVar ("n", TypeUnknown)),
+                        (ExpConst (ConstInt 1)))),
+                     TypeUnknown)),
+                  (ExpApp ((ExpVar ("fib", TypeUnknown)),
+                     (ExpBinaryOp (Sub, (ExpVar ("n", TypeUnknown)),
+                        (ExpConst (ConstInt 2)))),
+                     TypeUnknown))
                   ))
                ))
             )))
@@ -403,36 +435,37 @@ let%expect_test "bindings_test" =
   [%expect
     {|
     (Let (Rec,
-       [((PVar ("cps_fact", TUnknown)),
-         (EFun ((PVar ("x", TUnknown)),
-            (ELetIn (Notrec, "helper",
-               (EFun ((PVar ("x", TUnknown)),
-                  (EFun ((PVar ("acc", TUnknown)),
-                     (EIfElse (
-                        (EBinaryOp (Eq, (EVar ("x", TUnknown)), (EConst (CInt 1))
-                           )),
-                        (EApp ((EVar ("acc", TUnknown)), (EVar ("x", TUnknown)),
-                           TUnknown)),
-                        (EApp (
-                           (EApp ((EVar ("helper", TUnknown)),
-                              (EBinaryOp (Sub, (EVar ("x", TUnknown)),
-                                 (EConst (CInt 1)))),
-                              TUnknown)),
-                           (EFun ((PVar ("n", TUnknown)),
-                              (EBinaryOp (Mul, (EVar ("n", TUnknown)),
-                                 (EApp ((EVar ("acc", TUnknown)),
-                                    (EVar ("x", TUnknown)), TUnknown))
+       [((PatVar ("cps_fact", TypeUnknown)),
+         (ExpFun ((PatVar ("x", TypeUnknown)),
+            (ExpLetIn (Notrec, "helper",
+               (ExpFun ((PatVar ("x", TypeUnknown)),
+                  (ExpFun ((PatVar ("acc", TypeUnknown)),
+                     (ExpIfElse (
+                        (ExpBinaryOp (Eq, (ExpVar ("x", TypeUnknown)),
+                           (ExpConst (ConstInt 1)))),
+                        (ExpApp ((ExpVar ("acc", TypeUnknown)),
+                           (ExpVar ("x", TypeUnknown)), TypeUnknown)),
+                        (ExpApp (
+                           (ExpApp ((ExpVar ("helper", TypeUnknown)),
+                              (ExpBinaryOp (Sub, (ExpVar ("x", TypeUnknown)),
+                                 (ExpConst (ConstInt 1)))),
+                              TypeUnknown)),
+                           (ExpFun ((PatVar ("n", TypeUnknown)),
+                              (ExpBinaryOp (Mul, (ExpVar ("n", TypeUnknown)),
+                                 (ExpApp ((ExpVar ("acc", TypeUnknown)),
+                                    (ExpVar ("x", TypeUnknown)), TypeUnknown))
                                  ))
                               )),
-                           TUnknown))
+                           TypeUnknown))
                         ))
                      ))
                   )),
-               (EApp (
-                  (EApp ((EVar ("helper", TUnknown)), (EVar ("x", TUnknown)),
-                     TUnknown)),
-                  (EFun ((PVar ("a", TUnknown)), (EVar ("a", TUnknown)))),
-                  TUnknown))
+               (ExpApp (
+                  (ExpApp ((ExpVar ("helper", TypeUnknown)),
+                     (ExpVar ("x", TypeUnknown)), TypeUnknown)),
+                  (ExpFun ((PatVar ("a", TypeUnknown)),
+                     (ExpVar ("a", TypeUnknown)))),
+                  TypeUnknown))
                ))
             )))
          ]
@@ -446,14 +479,15 @@ let%expect_test "bindings_test" =
   [%expect
     {|
     (Let (Notrec,
-       [((PVar ("f", TUnknown)),
-         (EFun ((PVar ("g", (TArrow (TInt, (TArrow (TInt, TInt)))))),
-            (EFun ((PVar ("x", TInt)),
-               (EFun ((PVar ("y", TInt)),
-                  (EApp (
-                     (EApp ((EVar ("g", TUnknown)), (EVar ("x", TUnknown)),
-                        TUnknown)),
-                     (EVar ("y", TUnknown)), TUnknown))
+       [((PatVar ("f", TypeUnknown)),
+         (ExpFun (
+            (PatVar ("g", (TypeArrow (TypeInt, (TypeArrow (TypeInt, TypeInt)))))),
+            (ExpFun ((PatVar ("x", TypeInt)),
+               (ExpFun ((PatVar ("y", TypeInt)),
+                  (ExpApp (
+                     (ExpApp ((ExpVar ("g", TypeUnknown)),
+                        (ExpVar ("x", TypeUnknown)), TypeUnknown)),
+                     (ExpVar ("y", TypeUnknown)), TypeUnknown))
                   ))
                ))
             )))
@@ -468,10 +502,11 @@ let%expect_test "bindings_test" =
   [%expect
     {|
     (Let (Notrec,
-       [((PVar ("Add", (TArrow (TInt, (TArrow (TInt, TInt)))))),
-         (EFun ((PVar ("x", TInt)),
-            (EFun ((PVar ("y", TInt)),
-               (EBinaryOp (Sub, (EVar ("x", TUnknown)), (EVar ("y", TUnknown))))
+       [((PatVar ("Add", (TypeArrow (TypeInt, (TypeArrow (TypeInt, TypeInt)))))),
+         (ExpFun ((PatVar ("x", TypeInt)),
+            (ExpFun ((PatVar ("y", TypeInt)),
+               (ExpBinaryOp (Sub, (ExpVar ("x", TypeUnknown)),
+                  (ExpVar ("y", TypeUnknown))))
                ))
             )))
          ]
@@ -485,27 +520,28 @@ let%expect_test "bindings_test" =
   [%expect
     {|
     (Let (Notrec,
-       [((PVar ("h", TUnknown)),
-         (EFun ((PVar ("f1", TUnknown)),
-            (EFun ((PVar ("f2", TUnknown)),
-               (EFun ((PVar ("f3", TUnknown)),
-                  (EFun ((PVar ("f4", TUnknown)),
-                     (EFun ((PVar ("f5", TUnknown)),
-                        (EFun ((PVar ("f6", TUnknown)),
-                           (EFun ((PVar ("f7", TUnknown)),
-                              (EApp ((EVar ("f1", TUnknown)),
-                                 (EApp ((EVar ("f2", TUnknown)),
-                                    (EApp ((EVar ("f3", TUnknown)),
-                                       (EApp ((EVar ("f4", TUnknown)),
-                                          (EApp ((EVar ("f5", TUnknown)),
-                                             (EApp ((EVar ("f6", TUnknown)),
-                                                (EVar ("f7", TUnknown)), TUnknown
-                                                )),
-                                             TUnknown)),
-                                          TUnknown)),
-                                       TUnknown)),
-                                    TUnknown)),
-                                 TUnknown))
+       [((PatVar ("h", TypeUnknown)),
+         (ExpFun ((PatVar ("f1", TypeUnknown)),
+            (ExpFun ((PatVar ("f2", TypeUnknown)),
+               (ExpFun ((PatVar ("f3", TypeUnknown)),
+                  (ExpFun ((PatVar ("f4", TypeUnknown)),
+                     (ExpFun ((PatVar ("f5", TypeUnknown)),
+                        (ExpFun ((PatVar ("f6", TypeUnknown)),
+                           (ExpFun ((PatVar ("f7", TypeUnknown)),
+                              (ExpApp ((ExpVar ("f1", TypeUnknown)),
+                                 (ExpApp ((ExpVar ("f2", TypeUnknown)),
+                                    (ExpApp ((ExpVar ("f3", TypeUnknown)),
+                                       (ExpApp ((ExpVar ("f4", TypeUnknown)),
+                                          (ExpApp ((ExpVar ("f5", TypeUnknown)),
+                                             (ExpApp (
+                                                (ExpVar ("f6", TypeUnknown)),
+                                                (ExpVar ("f7", TypeUnknown)),
+                                                TypeUnknown)),
+                                             TypeUnknown)),
+                                          TypeUnknown)),
+                                       TypeUnknown)),
+                                    TypeUnknown)),
+                                 TypeUnknown))
                               ))
                            ))
                         ))
@@ -524,27 +560,31 @@ let%expect_test "bindings_test" =
   [%expect
     {|
     (Let (Notrec,
-       [((PVar ("h", TUnknown)),
-         (EFun ((PVar ("f1", TUnknown)),
-            (EFun ((PVar ("f2", TUnknown)),
-               (EFun ((PVar ("f3", TUnknown)),
-                  (EFun ((PVar ("f4", TUnknown)),
-                     (EFun ((PVar ("f5", TUnknown)),
-                        (EFun ((PVar ("f6", TUnknown)),
-                           (EFun ((PVar ("f7", TUnknown)),
-                              (EApp (
-                                 (EApp (
-                                    (EApp (
-                                       (EApp (
-                                          (EApp (
-                                             (EApp ((EVar ("f1", TUnknown)),
-                                                (EVar ("f2", TUnknown)), TUnknown
-                                                )),
-                                             (EVar ("f3", TUnknown)), TUnknown)),
-                                          (EVar ("f4", TUnknown)), TUnknown)),
-                                       (EVar ("f5", TUnknown)), TUnknown)),
-                                    (EVar ("f6", TUnknown)), TUnknown)),
-                                 (EVar ("f7", TUnknown)), TUnknown))
+       [((PatVar ("h", TypeUnknown)),
+         (ExpFun ((PatVar ("f1", TypeUnknown)),
+            (ExpFun ((PatVar ("f2", TypeUnknown)),
+               (ExpFun ((PatVar ("f3", TypeUnknown)),
+                  (ExpFun ((PatVar ("f4", TypeUnknown)),
+                     (ExpFun ((PatVar ("f5", TypeUnknown)),
+                        (ExpFun ((PatVar ("f6", TypeUnknown)),
+                           (ExpFun ((PatVar ("f7", TypeUnknown)),
+                              (ExpApp (
+                                 (ExpApp (
+                                    (ExpApp (
+                                       (ExpApp (
+                                          (ExpApp (
+                                             (ExpApp (
+                                                (ExpVar ("f1", TypeUnknown)),
+                                                (ExpVar ("f2", TypeUnknown)),
+                                                TypeUnknown)),
+                                             (ExpVar ("f3", TypeUnknown)),
+                                             TypeUnknown)),
+                                          (ExpVar ("f4", TypeUnknown)),
+                                          TypeUnknown)),
+                                       (ExpVar ("f5", TypeUnknown)), TypeUnknown
+                                       )),
+                                    (ExpVar ("f6", TypeUnknown)), TypeUnknown)),
+                                 (ExpVar ("f7", TypeUnknown)), TypeUnknown))
                               ))
                            ))
                         ))

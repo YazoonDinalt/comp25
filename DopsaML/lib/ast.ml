@@ -5,9 +5,9 @@
 type name = string [@@deriving eq, show { with_path = false }]
 
 type const =
-  | CInt of int (** integer number: ..., 0, 1, 2, ...*)
-  | CBool of bool (** boolean values: true and false *)
-  | CNil (** [] *)
+  | ConstInt of int (** integer number: ..., 0, 1, 2, ...*)
+  | ConstBool of bool (** boolean values: true and false *)
+  | ConstNil (** [] *)
 [@@deriving eq, show { with_path = false }]
 
 type binary_op =
@@ -26,18 +26,18 @@ type binary_op =
 [@@deriving eq, show { with_path = false }]
 
 type type_of_var =
-  | TInt (** int type for variable *)
-  | TBool (** bool type for variable *)
-  | TUnknown (** unknown type for variable *)
-  | TArrow of type_of_var * type_of_var (** type int -> int... *)
+  | TypeInt (** int type for variable *)
+  | TypeBool (** bool type for variable *)
+  | TypeUnknown (** unknown type for variable *)
+  | TypeArrow of type_of_var * type_of_var (** type int -> int... *)
 [@@deriving eq, show { with_path = false }]
 
 type pattern =
-  | PWild (** _ *)
-  | PConst of const (** constant pattern *)
-  | PVar of name * type_of_var (** variable pattern*)
-  | PTuple of pattern list (** (a, b) *)
-  | PCon of pattern * pattern (** hd :: tl *)
+  | PatWild (** _ *)
+  | PatConst of const (** constant pattern *)
+  | PatVar of name * type_of_var (** variable pattern*)
+  | PatTuple of pattern list (** (a, b) *)
+  | PatCon of pattern * pattern (** hd :: tl *)
 [@@deriving eq, show { with_path = false }]
 
 type rec_flag =
@@ -46,22 +46,22 @@ type rec_flag =
 [@@deriving eq, show { with_path = false }]
 
 type expression =
-  | EConst of const (** constant *)
-  | EVar of name * type_of_var (** variable *)
-  | EBinaryOp of binary_op * expression * expression (** binary operation *)
-  | EApp of expression * expression * type_of_var (** application *)
-  | EIfElse of expression * expression * expression (** if z then v else n*)
-  | ELetIn of rec_flag * name * expression * expression
-  | ELetPatIn of pattern * expression * expression
-  | EFun of pattern * expression (** fun z -> z + z *)
-  | EList of expression * expression (** [1;2;3]*)
-  | ETuple of expression list (** (1,2,3) *)
+  | ExpConst of const (** constant *)
+  | ExpVar of name * type_of_var (** variable *)
+  | ExpBinaryOp of binary_op * expression * expression (** binary operation *)
+  | ExpApp of expression * expression * type_of_var (** application *)
+  | ExpIfElse of expression * expression * expression (** if z then v else n*)
+  | ExpLetIn of rec_flag * name * expression * expression
+  | ExpLetPatIn of pattern * expression * expression
+  | ExpFun of pattern * expression (** fun z -> z + z *)
+  | ExpList of expression * expression (** [1;2;3]*)
+  | ExpTuple of expression list (** (1,2,3) *)
 [@@deriving eq, show { with_path = false }]
 
 (** Binding type *)
 type bindings =
   | Let of rec_flag * (pattern * expression) list
-  | Expression of expression (** simple expressions *)
+  | Exp of expression (** simple expressions *)
 [@@deriving eq, show { with_path = false }]
 
 (** Statements type *)
