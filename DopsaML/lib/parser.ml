@@ -368,7 +368,7 @@ let parse_Exp =
       (expconst
        <|> expvar
        <|> parse_tuple_expr pack
-       <|> parse_cons_semicolon_expr pack create_cons_sc)
+       <|> parse_cons_semicolon_expr pack create_cons_sc) 
   in
   let parse_if =
     parse_expbinop pack

@@ -328,6 +328,25 @@ let%expect_test "bindings_test" =
  |}]
 ;;
 
+
+let%expect_test "bindings_test" =
+  let test = "let sum (x: int) (y: bool) = x + y" in
+  start_test parse_bindings show_bindings test;
+  [%expect
+    {|
+    (Let (Notrec,
+       [((PatVar ("sum", TypeUnknown)),
+         (ExpFun ((PatVar ("x", TypeInt)),
+            (ExpFun ((PatVar ("y", TypeBool)),
+               (ExpBinaryOp (Add, (ExpVar ("x", TypeUnknown)),
+                  (ExpVar ("y", TypeUnknown))))
+               ))
+            )))
+         ]
+       ))
+ |}]
+;;
+
 let%expect_test "bindings_test" =
   let test = "[1;2;3;4]" in
   start_test parse_bindings show_bindings test;
