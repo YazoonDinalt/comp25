@@ -2,6 +2,6 @@
 
 (** SPDX-License-Identifier: LGPL-3.0-or-later *)
 
-open Ast
+open Middle.Anf
 
-val codegen : Format.formatter -> Structure.structure_item list -> unit
+val codegen : Format.formatter -> aprogram -> unit

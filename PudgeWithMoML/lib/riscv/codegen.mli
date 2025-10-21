@@ -1,0 +1,9 @@
+[@@@ocaml.text "/*"]
+
+(** Copyright 2025-2026, Gleb Nasretdinov, Ilhom Kombaev *)
+
+(** SPDX-License-Identifier: LGPL-3.0-or-later *)
+
+[@@@ocaml.text "/*"]
+
+val gen_aprogram : Middle_end.Anf.aprogram -> Format.formatter -> unit

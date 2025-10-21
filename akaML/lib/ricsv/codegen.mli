@@ -6,4 +6,4 @@
 
 [@@@ocaml.text "/*"]
 
-val gen_structure : Format.formatter -> Ast.structure -> unit
+val gen_a_structure : Format.formatter -> Anf.Anf_core.a_structure_item list -> unit
