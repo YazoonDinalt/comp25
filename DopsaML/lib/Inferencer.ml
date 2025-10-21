@@ -6,7 +6,6 @@ open Base
 open Ast
 open Ty
 
-
 module R : sig
   type 'a t
 
@@ -114,7 +113,10 @@ end = struct
   type t = (fresh, ty, Int.comparator_witness) Map.t
 
   let empty = Map.empty (module Int)
-  let mapping k v = if Type.occurs_in k v then fail (`Occurs_check(k, v)) else return (k, v)
+
+  let mapping k v =
+    if Type.occurs_in k v then fail (`Occurs_check (k, v)) else return (k, v)
+  ;;
 
   let singleton k v =
     let* k, v = mapping k v in
@@ -192,9 +194,9 @@ module VarSet = struct
   let fold_left_m f acc set =
     fold
       (fun x acc ->
-        let open R.Syntax in
-        let* acc = acc in
-        f acc x)
+         let open R.Syntax in
+         let* acc = acc in
+         f acc x)
       acc
       set
   ;;
@@ -260,9 +262,9 @@ let instantiate : scheme -> ty R.t =
   fun (S (bs, t)) ->
   VarSet.fold_left_m
     (fun typ name ->
-      let* f1 = fresh_var in
-      let* s = Subst.singleton name f1 in
-      return (Subst.apply s typ))
+       let* f1 = fresh_var in
+       let* s = Subst.singleton name f1 in
+       return (Subst.apply s typ))
     bs
     (return t)
 ;;
@@ -456,27 +458,35 @@ let expression_infer =
       let* sub = Subst.compose sub1 sub2 in
       return (sub, Subst.apply sub t1)
     | ExpBinaryOp (op, e1, e2) ->
-      let* subst_left, typ_left = helper env e1 in
-      let* subst_right, typ_right = helper env e2 in
-      (match op with
-       | Add | Sub | Mul | Div ->
-         let* subst' = Subst.unify typ_left (TPrim "int") in
-         let* subst'' = Subst.unify typ_right (TPrim "int") in
-         let* final_subst =
-           Subst.compose_all [ subst'; subst''; subst_left; subst_right ]
-         in
-         return (final_subst, TPrim "int")
-       | Eq | Less | Leq | Gre | Greq | Neq | And | Or ->
-         let* subst' = Subst.unify typ_left typ_right in
-         let* final_subst = Subst.compose_all [ subst'; subst_left; subst_right ] in
-         return (final_subst, TPrim "bool"))
+      let op_name = op_str op in
+      (match TypeEnv.find op_name env with
+      | Some _ ->
+          helper env (ExpApp (ExpApp (ExpVar (op_name, TypeUnknown), e1, TypeUnknown), e2, TypeUnknown))
+      | None ->
+          let* subst_left, typ_left = helper env e1 in
+          let* subst_right, typ_right = helper env e2 in
+          (match op with
+           | Add | Sub | Mul | Div ->
+             let* subst' = Subst.unify typ_left (TPrim "int") in
+             let* subst'' = Subst.unify typ_right (TPrim "int") in
+             let* final_subst = Subst.compose_all [ subst_left; subst_right; subst'; subst'' ] in
+             return (final_subst, TPrim "int")
+           | And | Or ->
+             let* subst' = Subst.unify typ_left (TPrim "bool") in
+             let* subst'' = Subst.unify typ_right (TPrim "bool") in
+             let* final_subst = Subst.compose_all [ subst_left; subst_right; subst'; subst'' ] in
+             return (final_subst, TPrim "bool")
+           | Eq | Neq | Less | Gre | Leq | Greq ->
+             let* subst' = Subst.unify typ_left typ_right in
+             let* final_subst = Subst.compose_all [ subst_left; subst_right; subst' ] in
+             return (final_subst, TPrim "bool")))
     | ExpList (hd, tl) ->
       let* s1, t1 = helper env hd in
       let* s2, t2 = helper (TypeEnv.apply s1 env) tl in
       let* elem_ty = fresh_var in
       let* s3 = Subst.unify t2 (list_typ elem_ty) in
       let* s4 = Subst.unify t1 elem_ty in
-      let* sub = Subst.compose_all [s1; s2; s3; s4] in
+      let* sub = Subst.compose_all [ s1; s2; s3; s4 ] in
       return (sub, list_typ (Subst.apply sub elem_ty))
   in
   helper
@@ -539,7 +549,6 @@ let bindings_infer env = function
     in
     return final_env
   | Let (Notrec, [ (pattern_, e) ]) ->
-    (* Original non-recursive case remains unchanged *)
     let* s, type1 = expression_infer env e in
     let env = TypeEnv.apply s env in
     let sc = generalize env type1 in
@@ -557,8 +566,7 @@ let bindings_infer env = function
 
 let start_env =
   let builtin =
-    [ 
-    "print_int", TArrow (TPrim "int", TPrim "unit")
+    [ "print_int", TArrow (TPrim "int", TPrim "unit")
     ]
   in
   let env = TypeEnv.empty in
@@ -572,21 +580,21 @@ let infer_simple_expression expr =
 
 let statments_infer structure =
   let initial_env = start_env in
-  List.fold_left structure ~init:(return (initial_env, Set.empty (module String))) ~f:(fun acc item ->
-    let* env, defined_names = acc in
-    let* new_env = bindings_infer env item in
-    (* Находим новые имена, которые появились в new_env *)
-    let new_names = 
-      Base.Map.fold new_env ~init:defined_names ~f:(fun ~key ~data:_ acc_names ->
-        if not (Base.Map.mem env key) 
-        then Set.add acc_names key
-        else acc_names)
-    in
-    return (new_env, new_names))
+  List.fold_left
+    structure
+    ~init:(return (initial_env, Set.empty (module String)))
+    ~f:(fun acc item ->
+      let* env, defined_names = acc in
+      let* new_env = bindings_infer env item in
+      (* Находим новые имена, которые появились в new_env *)
+      let new_names =
+        Base.Map.fold new_env ~init:defined_names ~f:(fun ~key ~data:_ acc_names ->
+          if not (Base.Map.mem env key) then Set.add acc_names key else acc_names)
+      in
+      return (new_env, new_names))
   >>| fun (final_env, defined_names) ->
   (* Оставляем только новые определения *)
-  Base.Map.filter_keys final_env ~f:(fun key ->
-    Set.mem defined_names key)
+  Base.Map.filter_keys final_env ~f:(fun key -> Set.mem defined_names key)
 ;;
 
 let run_infer s = run (statments_infer s)

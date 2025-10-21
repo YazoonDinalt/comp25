@@ -1,7 +1,5 @@
 open Format
 
-
-
 type binder = int [@@deriving eq, show { with_path = false }]
 
 module VarMap = Map.Make(Int)

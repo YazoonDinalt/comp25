@@ -160,7 +160,7 @@ let parse_pvar =
   @@ (lift
         (fun a ->
           if String.( <> ) a "_"
-          then PatVar (a, TypeArrow (TypeInt, TypeArrow (TypeInt, TypeInt)))
+          then PatVar (a, TypeUnknown)  
           else PatWild)
         parse_rename
       <|> lift2

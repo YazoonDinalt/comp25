@@ -299,7 +299,7 @@ let%expect_test "bindings_test" =
   [%expect
     {|
     (Let (Notrec,
-       [((PatVar ("Add", (TypeArrow (TypeInt, (TypeArrow (TypeInt, TypeInt)))))),
+       [((PatVar ("Add", TypeUnknown)),
          (ExpFun ((PatVar ("x", TypeUnknown)),
             (ExpFun ((PatVar ("y", TypeUnknown)),
                (ExpBinaryOp (Sub, (ExpVar ("x", TypeUnknown)),
@@ -392,17 +392,20 @@ let%expect_test "bindings_test" =
 ;;
 
 let%expect_test "bindings_test" =
-  let test = "2 * (4 + 4) * 1" in
+  let test = "let (+) a b = a && b" in
   start_test parse_bindings show_bindings test;
   [%expect
     {|
-    (Exp
-       (ExpBinaryOp (Mul,
-          (ExpBinaryOp (Mul, (ExpConst (ConstInt 2)),
-             (ExpBinaryOp (Add, (ExpConst (ConstInt 4)), (ExpConst (ConstInt 4))
-                ))
-             )),
-          (ExpConst (ConstInt 1)))))
+    (Let (Notrec,
+       [((PatVar ("Add", TypeUnknown)),
+         (ExpFun ((PatVar ("a", TypeUnknown)),
+            (ExpFun ((PatVar ("b", TypeUnknown)),
+               (ExpBinaryOp (And, (ExpVar ("a", TypeUnknown)),
+                  (ExpVar ("b", TypeUnknown))))
+               ))
+            )))
+         ]
+       ))
  |}]
 ;;
 
@@ -521,7 +524,7 @@ let%expect_test "bindings_test" =
   [%expect
     {|
     (Let (Notrec,
-       [((PatVar ("Add", (TypeArrow (TypeInt, (TypeArrow (TypeInt, TypeInt)))))),
+       [((PatVar ("Add", TypeUnknown)),
          (ExpFun ((PatVar ("x", TypeInt)),
             (ExpFun ((PatVar ("y", TypeInt)),
                (ExpBinaryOp (Sub, (ExpVar ("x", TypeUnknown)),

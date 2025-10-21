@@ -7,17 +7,33 @@ open Inferencer
 open Ast
 open Ty
 
+let pretty_op_name = function
+  | "Add" -> "(+)"
+  | "Sub" -> "(-)" 
+  | "Mul" -> "(*)"
+  | "Div" -> "(/)"
+  | "And" -> "(&&)"
+  | "Or" -> "(||)"
+  | "Eq" -> "(=)"
+  | "Neq" -> "(<>)"
+  | "Less" -> "(<)"
+  | "Gre" -> "(>)"
+  | "Leq" -> "(<=)"
+  | "Greq" -> "(>=)"
+  | name -> name
+
+
 let pretty_printer_parse_and_infer s =
   match Parser.parser s with
   | Ok parsed ->
     (match run_infer parsed with
      | Ok env ->
        Base.Map.iteri env ~f:(fun ~key ~data:(S (_, ty)) ->
-         Format.printf "val %s: %a\n" key pp_ty ty)
+         let pretty_key = pretty_op_name key in
+         Format.printf "val %s: %a\n" pretty_key pp_ty ty)
      | Error e -> Format.printf "Infer error. %a\n" pp_error_infer e)
   | Error e -> Format.printf "Parsing error. %s\n" e
 ;;
-
 
 let pretty_printer_parse_and_infer_simple s =
   match Parser.parser s with
@@ -35,7 +51,9 @@ let pretty_printer_parse_and_infer_simple s =
 
 let%expect_test "test_binary_oper" =
   pretty_printer_parse_and_infer_simple "10/2 + 56*2 - 10 / 10 / 20 + 666 - 777 + 1";
-  [%expect {|int|}]
+  [%expect
+    {|
+    int|}]
 ;;
 
 let%expect_test "test_bool" =
@@ -43,62 +61,66 @@ let%expect_test "test_bool" =
   [%expect {|bool|}]
 ;;
 
-
 let%expect_test "test_binary_oper_and_arg" =
   pretty_printer_parse_and_infer_simple "fun x -> x * 69 + 100 - 201 / 777";
-  [%expect {|int -> int|}]
+  [%expect
+    {|
+    int -> int|}]
 ;;
 
 let%expect_test "test_rec" =
-  pretty_printer_parse_and_infer 
-  "let rec func arg = func arg";
-  [%expect {|
+  pretty_printer_parse_and_infer "let rec func arg = func arg";
+  [%expect
+    {|
     val func: 'a -> 'b|}]
 ;;
 
 let%expect_test "test_func_apply_some_args" =
   pretty_printer_parse_and_infer "let func a1 a2 a3 = a1 a2 a3";
-  [%expect {|
+  [%expect
+    {|
     val func: ('a -> 'b -> 'c) -> 'a -> 'b -> 'c|}]
 ;;
 
 let%expect_test "test_list" =
   pretty_printer_parse_and_infer "let arr = [1;2;3]";
-  [%expect{| val arr: int list |}]
+  [%expect {|
+    val arr: int list |}]
 ;;
 
 let%expect_test "test_binary_oper" =
   pretty_printer_parse_and_infer "let is_above_10 x = if x > 10 then true else false ";
-  [%expect {|
+  [%expect
+    {|
     val is_above_10: int -> bool|}]
 ;;
 
 let%expect_test "test_binary_oper" =
   pretty_printer_parse_and_infer "let is_above_10 x = x > 10";
-  [%expect {|
+  [%expect
+    {|
     val is_above_10: int -> bool|}]
 ;;
 
 let%expect_test "test_factorial" =
   pretty_printer_parse_and_infer "let rec fac n = if n < 2 then 1 else n * fac (n - 1)";
-  [%expect {|
+  [%expect
+    {|
     val fac: int -> int|}]
 ;;
 
 let%expect_test "test_nested_list_function" =
   pretty_printer_parse_and_infer "let f x = [ [x; x]; [x] ]";
-  [%expect{| val f: 'a -> 'a list list |}]
+  [%expect {|
+    val f: 'a -> 'a list list |}]
 ;;
 
-let%expect_test "test_nested_option_function" =
-  pretty_printer_parse_and_infer "let f x = Some x";
-  [%expect {|Parsing error. : no more choices|}]
-;;
 
 let%expect_test "test_fibonacci" =
   pretty_printer_parse_and_infer
     "let rec fibo n = if n < 2 then 1 else fibo(n - 1) + fibo(n - 2)";
-  [%expect {|
+  [%expect
+    {|
     val fibo: int -> int|}]
 ;;
 
@@ -109,7 +131,8 @@ let%expect_test "test_unbound_var" =
 
 let%expect_test "test_annotate" =
   pretty_printer_parse_and_infer "let sum = fun (x : int) (y : int) -> x + y";
-  [%expect {|
+  [%expect
+    {|
     val sum: int -> int -> int|}]
 ;;
 
@@ -117,15 +140,23 @@ let%expect_test "test_annotate_fac" =
   pretty_printer_parse_and_infer
     "let rec fac = fun (n : int) (acc : int) -> if n < 2 then acc else fac (n-1) (acc * \
      n);;";
-  [%expect {|
+  [%expect
+    {|
     val fac: int -> int -> int|}]
 ;;
 
-let%expect_test "test_annotate_fac" =
-  pretty_printer_parse_and_infer
-    "let (+) = fun (x: int) (y: int) -> x - y";
-  [%expect {|
-    val Add: int -> int -> int|}]
+let%expect_test "test_redefinition1" =
+  pretty_printer_parse_and_infer "let (+) = fun (x: int) (y: int) -> x - y";
+  [%expect
+    {|
+      val (+): int -> int -> int |}]
+;;
+
+let%expect_test "test_redefinition" =
+  pretty_printer_parse_and_infer "let (+) a b = a && b";
+  [%expect
+    {|
+      val (+): bool -> bool -> bool |}]
 ;;
 
 let%expect_test "test_program_1" =
@@ -144,19 +175,22 @@ let%expect_test "test_program_2" =
   pretty_printer_parse_and_infer
     "let square = fun x -> x * x\n\
     \                                  let result = square 10";
-  [%expect {|
+  [%expect
+    {|
     val result: int
     val square: int -> int|}]
 ;;
 
 let%expect_test "test_annotate_error" =
   pretty_printer_parse_and_infer "let sum (x: int) (y: bool) = x + y";
-  
-  [%expect {|Infer error. Typechecker error: unification failed on bool and int|}]
+  [%expect
+    {|
+    Infer error. Typechecker error: unification failed on bool and int|}]
 ;;
 
 let%expect_test "test_unification_types" =
   pretty_printer_parse_and_infer "fun x -> x + true";
-  [%expect {|
+  [%expect
+    {|
     Infer error. Typechecker error: unification failed on bool and int|}]
 ;;
