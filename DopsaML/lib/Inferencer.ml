@@ -578,7 +578,7 @@ let infer_simple_expression expr =
   Result.map ~f:snd (run (expression_infer start_env expr))
 ;;
 
-let statments_infer structure =
+let statements_infer structure =
   let initial_env = start_env in
   List.fold_left
     structure
@@ -586,15 +586,13 @@ let statments_infer structure =
     ~f:(fun acc item ->
       let* env, defined_names = acc in
       let* new_env = bindings_infer env item in
-      (* Находим новые имена, которые появились в new_env *)
       let new_names =
         Base.Map.fold new_env ~init:defined_names ~f:(fun ~key ~data:_ acc_names ->
           if not (Base.Map.mem env key) then Set.add acc_names key else acc_names)
       in
       return (new_env, new_names))
   >>| fun (final_env, defined_names) ->
-  (* Оставляем только новые определения *)
   Base.Map.filter_keys final_env ~f:(fun key -> Set.mem defined_names key)
 ;;
 
-let run_infer s = run (statments_infer s)
+let run_infer s = run (statements_infer s)
