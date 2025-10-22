@@ -1,8 +1,12 @@
+(** Copyright 2025-2026, Vitaliy Dyachkov, Ruslan Nafikov*)
+
+(** SPDX-License-Identifier: LGPL-3.0-or-later *)
+
 open Format
 
 type binder = int [@@deriving eq, show { with_path = false }]
 
-module VarMap = Map.Make(Int)
+module VarMap = Map.Make (Int)
 
 module VarSet = struct
   include Stdlib.Set.Make (Int)
@@ -24,40 +28,36 @@ type ty =
   | TTuple of ty list
 [@@deriving show { with_path = false }]
 
-
 let normalize_ty_vars ty =
   let var_map = ref VarMap.empty in
   let next_var = ref 0 in
-  
   let rec collect_vars acc = function
     | TVar x -> VarSet.add x acc
     | TArrow (l, r) -> collect_vars (collect_vars acc l) r
     | TList t -> collect_vars acc t
-    | TTuple ts -> 
-        List.fold_left (fun acc t -> collect_vars acc t) acc ts
+    | TTuple ts -> List.fold_left (fun acc t -> collect_vars acc t) acc ts
     | TPrim _ -> acc
   in
-  
   let vars = collect_vars VarSet.empty ty in
   let sorted_vars = List.sort Int.compare (VarSet.elements vars) in
-  
   (* Создаем mapping *)
-  List.iter (fun var ->
-    var_map := VarMap.add var !next_var !var_map;
-    incr next_var
-  ) sorted_vars;
-  
+  List.iter
+    (fun var ->
+       var_map := VarMap.add var !next_var !var_map;
+       incr next_var)
+    sorted_vars;
   let rec normalize = function
-    | TVar x -> 
-        (match VarMap.find_opt x !var_map with
-         | Some new_var -> TVar new_var
-         | None -> TVar x)
+    | TVar x ->
+      (match VarMap.find_opt x !var_map with
+       | Some new_var -> TVar new_var
+       | None -> TVar x)
     | TArrow (l, r) -> TArrow (normalize l, normalize r)
     | TList t -> TList (normalize t)
     | TTuple ts -> TTuple (List.map normalize ts)
     | t -> t
   in
   normalize ty
+;;
 
 let rec pp_ty fmt ty =
   let normalized_ty = normalize_ty_vars ty in
@@ -65,13 +65,12 @@ let rec pp_ty fmt ty =
 
 and pp_ty_internal fmt = function
   | TPrim x -> fprintf fmt "%s" x
-  | TVar x -> 
-      let var_name = 
-        if x < 26 
-        then String.make 1 (Char.chr (97 + x)) 
-        else "'" ^ string_of_int (x + 1)  (* для x >= 26 *)
-      in
-      fprintf fmt "'%s" var_name
+  | TVar x ->
+    let var_name =
+      if x < 26 then String.make 1 (Char.chr (97 + x)) else "'" ^ string_of_int (x + 1)
+      (* для x >= 26 *)
+    in
+    fprintf fmt "'%s" var_name
   | TArrow (l, r) ->
     (match l, r with
      | TArrow _, _ -> fprintf fmt "(%a) -> %a" pp_ty_internal l pp_ty_internal r

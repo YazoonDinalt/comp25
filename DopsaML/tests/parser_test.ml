@@ -125,7 +125,8 @@ let%expect_test "expression_test" =
 let%expect_test "expression_test" =
   let test = "[1; 5]" in
   start_test parse_Exp show_expression test;
-  [%expect {|
+  [%expect
+    {|
     (ExpList ((ExpConst (ConstInt 1)),
        (ExpList ((ExpConst (ConstInt 5)), (ExpConst ConstNil))))) |}]
 ;;
@@ -148,7 +149,8 @@ let%expect_test "expression_test" =
 let%expect_test "expression_test" =
   let test = "true || false" in
   start_test parse_Exp show_expression test;
-  [%expect {| (ExpBinaryOp (Or, (ExpConst (ConstBool true)), (ExpConst (ConstBool false)))) |}]
+  [%expect
+    {| (ExpBinaryOp (Or, (ExpConst (ConstBool true)), (ExpConst (ConstBool false)))) |}]
 ;;
 
 (* EIfElse *)
@@ -289,7 +291,8 @@ let%expect_test "bindings_test" =
 let%expect_test "bindings_test" =
   let test = "4 + 3" in
   start_test parse_bindings show_bindings test;
-  [%expect {|
+  [%expect
+    {|
     (Exp (ExpBinaryOp (Add, (ExpConst (ConstInt 4)), (ExpConst (ConstInt 3))))) |}]
 ;;
 
@@ -327,7 +330,6 @@ let%expect_test "bindings_test" =
        ))
  |}]
 ;;
-
 
 let%expect_test "bindings_test" =
   let test = "let sum (x: int) (y: bool) = x + y" in

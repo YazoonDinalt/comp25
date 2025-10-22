@@ -99,7 +99,10 @@ let parse_int =
 let parse_nil = parse_white_space *> ((fun _ -> ConstNil) <$> string "[]")
 
 (* Var parsers *)
-let constr_type = (fun _ -> TypeInt) <$> string "int" <|> ((fun _ -> TypeBool) <$> string "bool")
+let constr_type =
+  (fun _ -> TypeInt) <$> string "int" <|> ((fun _ -> TypeBool) <$> string "bool")
+;;
+
 let parse_arrow = parse_empty @@ stoken "->"
 
 let parse_types =
@@ -158,10 +161,7 @@ let parse_rename =
 let parse_pvar =
   brackets_or_not
   @@ (lift
-        (fun a ->
-          if String.( <> ) a "_"
-          then PatVar (a, TypeUnknown)  
-          else PatWild)
+        (fun a -> if String.( <> ) a "_" then PatVar (a, TypeUnknown) else PatWild)
         parse_rename
       <|> lift2
             (fun a b -> if String.( <> ) a "_" then PatVar (a, b) else PatWild)
@@ -313,8 +313,8 @@ let parse_ExpLetIn expr =
   let lift5 f p1 p2 p3 p4 p5 = f <$> p1 <*> p2 <*> p3 <*> p4 <*> p5 in
   lift5
     (fun is_rec name args expr1 expr2 ->
-      let expr = constr_ExpFun args expr1 in
-      ExpLetIn (is_rec, name, expr, expr2))
+       let expr = constr_ExpFun args expr1 in
+       ExpLetIn (is_rec, name, expr, expr2))
     (parse_white_space *> stoken "let" *> parse_rec)
     parse_name
     (many parse_pattern)
@@ -368,7 +368,7 @@ let parse_Exp =
       (expconst
        <|> expvar
        <|> parse_tuple_expr pack
-       <|> parse_cons_semicolon_expr pack create_cons_sc) 
+       <|> parse_cons_semicolon_expr pack create_cons_sc)
   in
   let parse_if =
     parse_expbinop pack
@@ -441,9 +441,7 @@ let parse_Exp =
           <|> expconst)
   in
   let expletin =
-    parse_ExpLetIn (expression pack)
-    <|> brackets @@ parse_ExpLetIn pack
-    <|> expifelse
+    parse_ExpLetIn (expression pack) <|> brackets @@ parse_ExpLetIn pack <|> expifelse
   in
   choice
     [ expletin
@@ -465,8 +463,8 @@ let parse_let parse =
   let parse_single_let =
     lift4
       (fun flag name args body ->
-        let body = constr_ExpFun args body in
-        flag, name, body)
+         let body = constr_ExpFun args body in
+         flag, name, body)
       parse_rec
       parse_pattern
       (parse_white_space *> many (brackets_or_not parse_pattern))
@@ -475,8 +473,8 @@ let parse_let parse =
   let parse_single_multy_let =
     lift3
       (fun name args body ->
-        let body = constr_ExpFun args body in
-        name, body)
+         let body = constr_ExpFun args body in
+         name, body)
       parse_pattern
       (parse_white_space *> many (brackets_or_not parse_pattern))
       (stoken "=" *> parse)
