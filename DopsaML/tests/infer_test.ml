@@ -159,6 +159,13 @@ let%expect_test "test_redefinition" =
       val (+): bool -> bool -> bool |}]
 ;;
 
+let%expect_test "test_redefinition" =
+  pretty_printer_parse_and_infer "let (+) a b = if a > b then false else true";
+  [%expect
+    {|
+      val (+): 'a -> 'a -> bool |}]
+;;
+
 let%expect_test "test_program_1" =
   pretty_printer_parse_and_infer
     "let div = fun x y -> x / y \n\
