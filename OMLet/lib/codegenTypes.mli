@@ -1,21 +1,31 @@
 (** Copyright 2025, Ksenia Kotelnikova <xeniia.ka@gmail.com>, Sofya Kozyreva <k81sofia@gmail.com>, Vyacheslav Kochergin <vyacheslav.kochergin1@gmail.com> *)
 
 (** SPDX-License-Identifier: LGPL-3.0-or-later *)
+
 open Format
+
+type value =
+  | Num of int
+  | Ptr of int
 
 type reg =
   | Zero
   | Ra
+  | Fp
   | Sp
-  | Stack of int
+  | Stack of int * reg
   | Temp of int
   | Saved of int
   | Arg of int
 
-type storage_place =
-  | Offset of int
-  | FuncLabel of string
-  | Register of reg
+type variable_type =
+  | Argument
+  | Local
+
+type meta_info =
+  | Var of int * variable_type
+  | Func of string * int
+  | Value of reg
 
 val temp : int -> reg
 val saved : int -> reg
@@ -36,6 +46,8 @@ type itype_op =
   | JALR
   | SLTI
   | XORI
+  | SLLI
+  | SRLI
 
 type stack_op =
   | LW
@@ -55,7 +67,8 @@ type utype_op =
 type jtype_op = JAL
 
 type pseudo_instr =
-  | LI of reg * int
+  | LI of reg * value
+  | LA of reg * string
   | MV of reg * reg
   | J of string
   | RET
@@ -65,11 +78,11 @@ type pseudo_instr =
 
 type true_instr =
   | RType of rtype_op * reg * reg * reg
-  | IType of itype_op * reg * reg * int
+  | IType of itype_op * reg * reg * value
   | StackType of stack_op * reg * reg
   | BType of btype_op * reg * reg * string
-  | UType of utype_op * reg * int
-  | JType of jtype_op * reg * int
+  | UType of utype_op * reg * value
+  | JType of jtype_op * reg * value
   | Label of string
   | Ecall
 

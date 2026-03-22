@@ -2,6 +2,6 @@
 
 (** SPDX-License-Identifier: LGPL-3.0-or-later *)
 
-open Middle.Anf
+open Middle.Anf_types
 
 val codegen : Format.formatter -> aprogram -> unit

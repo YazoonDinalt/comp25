@@ -1,5 +1,7 @@
-do_not_type:
+Copyright 2025-2026, Friend-zva, RodionovMaxim05
+SPDX-License-Identifier: LGPL-3.0-or-later
 
+====================== do_not_type ======================
   $ ../bin/akaML.exe -inference -fromfile manytests/do_not_type/001.ml
   Inferencer error: Undefined variable 'fac'
 
@@ -18,8 +20,7 @@ do_not_type:
   $ ../bin/akaML.exe -inference -fromfile manytests/do_not_type/099.ml
   Inferencer error: Only variables are allowed as left-hand side of `let rec'
 
-typed:
-
+====================== typed ======================
   $ ../bin/akaML.exe -inference -fromfile manytests/typed/001fac.ml
   val fac : int -> int
   val main : int
@@ -69,6 +70,19 @@ typed:
 
   $ ../bin/akaML.exe -inference -fromfile manytests/typed/010fac_anf.ml
   val fac : int -> int
+  val main : int
+
+  $ ../bin/akaML.exe -inference -fromfile manytests/typed/010faccps_ll.ml
+  val id : 'a -> 'a
+  val fresh_1 : int -> (int -> 'a) -> int -> 'a
+  val fac_cps : int -> (int -> 'a) -> 'a
+  val main : int
+
+  $ ../bin/akaML.exe -inference -fromfile manytests/typed/010fibcps_ll.ml
+  val id : 'a -> 'a
+  val fresh_2 : int -> (int -> 'a) -> int -> 'a
+  val fresh_1 : int -> (int -> 'a) -> (int -> (int -> 'a) -> 'b) -> int -> 'b
+  val fib : int -> (int -> 'a) -> 'a
   val main : int
 
   $ ../bin/akaML.exe -inference -fromfile manytests/typed/010sukharev.ml

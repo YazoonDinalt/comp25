@@ -30,27 +30,7 @@ and pp_cexpr fmt = function
   | CIte (c, t, Some e) ->
     fprintf fmt "@[<v 2>if %a@ then %a@ else %a@]" pp_cexpr c pp_aexpr t pp_aexpr e
   | CIte (c, t, None) -> fprintf fmt "@[<v 2>if %a@ then %a@]" pp_cexpr c pp_aexpr t
-  | CLam _ as lam ->
-    let rec collect_args acc = function
-      | CLam (Ident arg, body) ->
-        (match body with
-         | ACExpr (CLam _) ->
-           collect_args
-             (arg :: acc)
-             (match body with
-              | ACExpr c -> c
-              | _ -> assert false)
-         | _ -> List.rev (arg :: acc), body)
-      | _ -> failwith "NYI"
-    in
-    let args, body = collect_args [] lam in
-    fprintf
-      fmt
-      "@[<2>fun %a -> @,%a@]"
-      (pp_print_list ~pp_sep:(fun fmt () -> fprintf fmt " ") pp_print_string)
-      args
-      pp_aexpr
-      body
+  | CLam (Ident arg, body) -> fprintf fmt "@[<2>fun %s -> @,%a@]" arg pp_aexpr body
   | CApp (fn, args) ->
     fprintf
       fmt
@@ -59,10 +39,17 @@ and pp_cexpr fmt = function
       fn
       (pp_print_list ~pp_sep:(fun fmt () -> fprintf fmt " ") pp_imm)
       args
+  | CField (imm, num) -> fprintf fmt "%a.%d" pp_imm imm num
 
 and pp_imm fmt = function
   | ImmNum n -> fprintf fmt "%d" n
   | ImmId (Ident x) -> fprintf fmt "%s" x
+  | ITuple (fst, snd, rest) ->
+    fprintf
+      fmt
+      "@[<2>(%a)@]"
+      (pp_print_list ~pp_sep:(fun fmt () -> fprintf fmt ", ") pp_imm)
+      (fst :: snd :: rest)
 
 and pp_binding fmt (id, aexpr) =
   let open Ast in
@@ -80,7 +67,7 @@ and pp_astatement fmt (is_rec, bindings) =
   in
   fprintf
     fmt
-    "@[<v 0>%s %a@]"
+    "@[<v 0>%s %a@]\n"
     keyword
     (pp_print_list ~pp_sep:(fun fmt () -> fprintf fmt "@ and ") pp_binding)
     bindings

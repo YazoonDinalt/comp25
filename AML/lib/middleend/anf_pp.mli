@@ -2,4 +2,6 @@
 
 (** SPDX-License-Identifier: LGPL-3.0-or-later *)
 
-val pp_anf : Format.formatter -> Anf.astructure_item list -> unit
+open Anf_types
+
+val pp_anf : Format.formatter -> astructure_item list -> unit

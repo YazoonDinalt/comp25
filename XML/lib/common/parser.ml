@@ -1,4 +1,4 @@
-(** Copyright 2024, Mikhail Gavrilenko, Danila Rudnev-Stepanyan*)
+(** Copyright 2024,  Mikhail Gavrilenko, Danila Rudnev-Stepanyan, Daniel Vlasenko*)
 
 (** SPDX-License-Identifier: LGPL-3.0-or-later *)
 
@@ -46,6 +46,48 @@ let pident_cap =
   if Ast.is_not_keyword ident
   then return ident
   else fail "Found a keyword instead of an identifier"
+;;
+
+(* https://ocaml.org/manual/5.4/lex.html#start-section *)
+let is_core_operator_char = function
+  | '$' | '&' | '*' | '+' | '-' | '/' | '=' | '>' | '@' | '^' -> true
+  | _ -> false
+;;
+
+let is_operator_char = function
+  | x when is_core_operator_char x -> true
+  | '~' | '!' | '?' | ':' | '.' | '<' | '%' -> true
+  | _ -> false
+;;
+
+let pinfix_symbol ?starts () =
+  let* p1 =
+    Option.value_map
+      starts
+      ~f:string
+      ~default:(char '%' <|> char '<' <|> satisfy is_core_operator_char >>| Char.to_string)
+  in
+  let* p2 = take_while is_operator_char in
+  return (p1 ^ p2)
+;;
+
+let pinfix_op ?starts () =
+  let pbin =
+    string "*"
+    <|> string "+"
+    <|> string "-"
+    <|> string "="
+    <|> string "!="
+    <|> string "<"
+    <|> string ">"
+    <|> string "||"
+    <|> string "|"
+    <|> string "&&"
+  in
+  Option.value_map
+    starts
+    ~f:(fun s -> pinfix_symbol ~starts:s ())
+    ~default:(pinfix_symbol () <|> pbin)
 ;;
 
 let pident_lc =
@@ -151,7 +193,7 @@ let pmultiargsapp pty =
 
 let ptypevar =
   let* id = token "'" *> (pident_lc <|> pident_cap) in
-  return (TypeExpr.Type_var id)
+  return (TypeExpr.Type_var { contents = Unbound (id, 0) })
 ;;
 
 let ptypetuple ptype =
@@ -279,7 +321,7 @@ let ptuplepat ppattern =
 ;;
 
 let ppatvar =
-  let* id = pident_lc in
+  let* id = pident_lc <|> pparenth (pinfix_op ()) in
   match id with
   | "_" -> return Pattern.Pat_any
   | _ -> return (Pattern.Pat_var id)
@@ -357,6 +399,7 @@ let pexprconst =
 
 let pidentexpr =
   pident_lc
+  <|> pparenth (pinfix_op ())
   >>= fun ident ->
   if is_not_keyword ident
   then return (Expression.Exp_ident ident)
@@ -456,29 +499,26 @@ let rec parseprefop pexpr pop =
   <|> pexpr
 ;;
 
-let parsebinop binoptoken =
-  token binoptoken
-  *> return (fun e1 e2 ->
-    Expression.Exp_apply (Exp_ident binoptoken, Exp_tuple (e1, e2, [])))
+let parse_infix_startw starts =
+  let* op = pass_ws *> pinfix_op ~starts () <* pass_ws in
+  return (fun e1 e2 -> Expression.Exp_apply (Exp_apply (Exp_ident op, e1), e2))
 ;;
 
-let padd = parsebinop "+"
-let psub = parsebinop "-"
-let pdiv = parsebinop "/"
-let pmul = parsebinop "*"
+let padd = parse_infix_startw "+"
+let psub = parse_infix_startw "-"
+let pdiv = parse_infix_startw "/"
+let pmul = parse_infix_startw "*"
 
 let pcompops =
   choice
-    [ parsebinop ">="
-    ; parsebinop "<="
-    ; parsebinop "<>"
-    ; parsebinop "<"
-    ; parsebinop ">"
-    ; parsebinop "="
+    [ parse_infix_startw "="
+    ; parse_infix_startw "<"
+    ; parse_infix_startw ">"
+    ; parse_infix_startw "$"
     ]
 ;;
 
-let plogops = choice [ parsebinop "&&"; parsebinop "||" ]
+let plogops = choice [ parse_infix_startw "&&"; parse_infix_startw "||" ]
 
 let pexprconstraint pexpr =
   let* expr = token "(" *> pexpr in
@@ -521,19 +561,21 @@ let pexpr =
       return (Expression.Exp_apply (constr, arg))
     in
     let papply = lchain (pconstructor_apply <|> poprnd) papplyexpr in
-    let prefop =
+    let pprefix1 =
       parseprefop
         papply
         (choice [ token "+"; token "-" ]
          >>| fun id expr -> Expression.Exp_apply (Exp_ident id, expr))
       <|> papply
     in
-    let pmuldiv = lchain prefop (pmul <|> pdiv) in
-    let paddsub = lchain pmuldiv (padd <|> psub) in
-    let pcompare = lchain paddsub pcompops in
-    let pexpcons = pexpcons pcompare <|> pcompare in
-    let plogop = rchain pexpcons plogops in
-    let ptuple = ptupleexpr plogop <|> plogop in
+    let pinfix = lchain pprefix1 (parse_infix_startw "**") in
+    let pinfix = lchain pinfix (parse_infix_startw "*" <|> parse_infix_startw "/") in
+    let pinfix = lchain pinfix (parse_infix_startw "+" <|> parse_infix_startw "-") in
+    let pinfix = pexpcons pinfix <|> pinfix in
+    let pinfix = lchain pinfix (parse_infix_startw "@" <|> parse_infix_startw "^") in
+    let pinfix = lchain pinfix pcompops in
+    let pinfix = rchain pinfix plogops in
+    let ptuple = ptupleexpr pinfix <|> pinfix in
     choice
       [ pfunction pexpr; pfunexpr pexpr; pletexpr pexpr; pifexpr pexpr; pmatch pexpr ]
     <|> ptuple)
@@ -564,59 +606,19 @@ let pstrlet =
   return (Structure.Str_value (recflag, (bindingfs, bindingtl)))
 ;;
 
-let pstradt =
-  let* _ = token "type" in
-  let* type_param =
-    option
-      []
-      (pparenth (sep_by (token ",") (token "'" *> pident_lc))
-       <|> many (token "'" *> pident_lc))
-  in
-  let* type_name = pass_ws *> pident_lc in
-  let var =
-    let* name = option None (pass_ws *> pident_cap >>= fun n -> return (Some n)) in
-    match name with
-    | Some x ->
-      (* Constructor case: Can have "of" *)
-      let* ctype =
-        option
-          None
-          (token "of"
-           *> let* types = sep_by (token "*") ptype_adt in
-              match types with
-              | x :: y :: xs -> return (Some (TypeExpr.Type_tuple (x, y, xs)))
-              | [ x ] -> return (Some x)
-              | [] -> fail "Expected type after 'of'")
-      in
-      return (x, ctype)
-    | None ->
-      (* Lowercase type alias case: Must have a type expression *)
-      let* ctype =
-        let* types = sep_by (token "*") ptype_adt in
-        match types with
-        | x :: y :: xs -> return (Some (TypeExpr.Type_tuple (x, y, xs))) (* Tuple case *)
-        | [ x ] -> return (Some x) (* Single type *)
-        | [] -> fail "Expected type definition"
-      in
-      return ("", ctype)
-  in
-  let* _ = token "=" in
-  let* fvar =
-    option
-      None
-      (option None (token "|" *> return None) *> (var >>= fun v -> return (Some v)))
-  in
-  let* varl = many (token "|" *> var) in
-  match fvar with
-  | Some fvar -> return (Structure.Str_adt (type_param, type_name, (fvar, varl)))
-  | None -> fail "Expected at least one variant"
-;;
-
-let pstr_item = pseval <|> pstrlet <|> pstradt
+let pstr_item = pseval <|> pstrlet
 
 let pstructure =
   let psemicolon = many (token ";;") in
   sep_by psemicolon pstr_item <* psemicolon <* pass_ws
+;;
+
+let parse_exp_str str =
+  parse_string ~consume:All (pass_ws *> pexpr <* pass_ws) str |> Result.ok_or_failwith
+;;
+
+let parse_pat_str str =
+  parse_string ~consume:All (pass_ws *> ppattern <* pass_ws) str |> Result.ok_or_failwith
 ;;
 
 let parse str = parse_string ~consume:All pstructure str

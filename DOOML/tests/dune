@@ -1,0 +1,10 @@
+(cram
+ (deps
+  %{bin:Dooml-Riscv}
+  %{bin:Dooml-Llvm}
+  ../lib/runtime.so
+  ../lib/riscv64-runtime.a
+  ../lib/riscv64-gc-runtime.a
+  closure.ml
+  fac.ml
+  fib-cps.ml))

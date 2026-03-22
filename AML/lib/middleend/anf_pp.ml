@@ -3,7 +3,7 @@
 (** SPDX-License-Identifier: LGPL-3.0-or-later *)
 
 open Format
-open Anf
+open Anf_types
 
 let pp_binop ppf = function
   | Add -> pp_print_string ppf "+"

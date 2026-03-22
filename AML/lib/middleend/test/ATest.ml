@@ -6,10 +6,12 @@ open Ast
 open Ast.Expression
 open Ast.Structure
 open Middle.Anf
+open Middle.Anf_types
 
 let test_anf (prog : program) =
-  let anf_prog = anf_transform prog in
-  print_endline (show_aprogram anf_prog)
+  match anf_transform prog with
+  | Ok anf_prog -> print_endline (show_aprogram anf_prog)
+  | Error msg -> Printf.eprintf "ANF transform error: %s\n" msg
 ;;
 
 (*
@@ -88,10 +90,10 @@ let%expect_test "anf_fac" =
               )))
         ));
       (AStr_value (Nonrecursive, "main",
-         (ALet (Nonrecursive, "t_4", (CApp ((ImmId "fac"), [(ImmNum 4)])),
-            (ALet (Nonrecursive, "t_5",
-               (CApp ((ImmId "print_int"), [(ImmId "t_4")])),
-               (ALet (Nonrecursive, "()", (CImm (ImmId "t_5")),
+         (ALet (Nonrecursive, "t_5", (CApp ((ImmId "fac"), [(ImmNum 4)])),
+            (ALet (Nonrecursive, "t_6",
+               (CApp ((ImmId "print_int"), [(ImmId "t_5")])),
+               (ALet (Nonrecursive, "()", (CImm (ImmId "t_6")),
                   (ACE (CImm (ImmNum 0)))))
                ))
             ))
@@ -191,10 +193,10 @@ let%expect_test "anf_fib" =
               )))
         ));
       (AStr_value (Nonrecursive, "main",
-         (ALet (Nonrecursive, "t_6", (CApp ((ImmId "fib"), [(ImmNum 4)])),
-            (ALet (Nonrecursive, "t_7",
-               (CApp ((ImmId "print_int"), [(ImmId "t_6")])),
-               (ALet (Nonrecursive, "()", (CImm (ImmId "t_7")),
+         (ALet (Nonrecursive, "t_7", (CApp ((ImmId "fib"), [(ImmNum 4)])),
+            (ALet (Nonrecursive, "t_8",
+               (CApp ((ImmId "print_int"), [(ImmId "t_7")])),
+               (ALet (Nonrecursive, "()", (CImm (ImmId "t_8")),
                   (ACE (CImm (ImmNum 0)))))
                ))
             ))
@@ -300,9 +302,9 @@ let%expect_test "anf_third_test" =
                               (ACE (CApp ((ImmId "large"), [(ImmId "x")])))))
                            )))
                      ))),
-               (ALet (Nonrecursive, "t_7",
+               (ALet (Nonrecursive, "t_8",
                   (CApp ((ImmId "print_int"), [(ImmNum 42)])),
-                  (ALet (Nonrecursive, "t42", (CImm (ImmId "t_7")),
+                  (ALet (Nonrecursive, "t42", (CImm (ImmId "t_8")),
                      (ACE
                         (CIte ((ImmNum 1),
                            (ACE

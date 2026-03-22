@@ -1,4 +1,4 @@
-(** Copyright 2024, Mikhail Gavrilenko, Danila Rudnev-Stepanyan*)
+(** Copyright 2024,  Mikhail Gavrilenko, Danila Rudnev-Stepanyan, Daniel Vlasenko*)
 
 (** SPDX-License-Identifier: LGPL-3.0-or-later *)
 
@@ -10,10 +10,14 @@ type reg =
   | SP
   | Zero
 
+val gen_reg : reg QCheck.Gen.t
 val equal_reg : reg -> reg -> bool
 val pp_reg : Format.formatter -> reg -> unit
 
 type offset = reg * int
+
+val gen_offset : offset QCheck.Gen.t
+val equal_offset : offset -> offset -> bool
 
 type instr =
   | Addi of reg * reg * int (* ADD immediate *)
@@ -26,6 +30,7 @@ type instr =
   | Xor of reg * reg * reg (* XOR *)
   | Xori of reg * reg * int (* XOR immediate *)
   | Beq of reg * reg * string (* BEQ: branch if equal *)
+  | Bne of reg * reg * string (* BNE: branch if not equal *)
   | Blt of reg * reg * string (* BLT: branch if less than *)
   | Ble of reg * reg * string (* BLE: branch if less or equal *)
   | Lla of reg * string (* LLA: load address *)
@@ -40,7 +45,11 @@ type instr =
   | Ecall (* ECALL *)
   | Ret (* return *)
   | La of reg * string (* Load Address of labeled function into the reg *)
+  | Slli of reg * reg * int (* << imm *)
+  | Srai of reg * reg * int (* >> imm (arith) *)
 
+val gen_instr : instr QCheck.Gen.t
+val equal_instr : instr -> instr -> bool
 val pp_instr : Format.formatter -> instr -> unit
 val addi : (instr -> 'a) -> reg -> reg -> int -> 'a
 val add : (instr -> 'a) -> reg -> reg -> reg -> 'a
@@ -66,3 +75,5 @@ val j : (instr -> 'a) -> string -> 'a
 val la : (instr -> 'a) -> reg -> string -> 'a
 val comment : (instr -> 'a) -> string -> 'a
 val label : (instr -> 'a) -> string -> 'a
+val slli : (instr -> 'a) -> reg -> reg -> int -> 'a
+val srai : (instr -> 'a) -> reg -> reg -> int -> 'a
