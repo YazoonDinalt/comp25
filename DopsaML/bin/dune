@@ -1,3 +1,6 @@
 (executable
  (name DopsaML)
- (libraries stdio base))
+ (libraries DopsaML_lib stdio base)
+ (foreign_stubs
+  (language c)
+  (names runtime)))

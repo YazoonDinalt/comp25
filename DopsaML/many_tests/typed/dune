@@ -1,2 +1,6 @@
 (cram
- (deps ./001fac.ml))
+ (deps
+  ./001fac.ml
+  ./010fac_anf.ml
+  %{exe:../../bin/DopsaML.exe}
+  ../../bin/runtime.c))
