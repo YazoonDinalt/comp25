@@ -9,7 +9,7 @@ open Ty
 
 let pretty_op_name = function
   | "Add" -> "(+)"
-  | "Sub" -> "(-)" 
+  | "Sub" -> "(-)"
   | "Mul" -> "(*)"
   | "Div" -> "(/)"
   | "And" -> "(&&)"
@@ -21,7 +21,7 @@ let pretty_op_name = function
   | "Leq" -> "(<=)"
   | "Greq" -> "(>=)"
   | name -> name
-
+;;
 
 let pretty_printer_parse_and_infer s =
   match Parser.parser s with
@@ -84,7 +84,8 @@ let%expect_test "test_func_apply_some_args" =
 
 let%expect_test "test_list" =
   pretty_printer_parse_and_infer "let arr = [1;2;3]";
-  [%expect {|
+  [%expect
+    {|
     val arr: int list |}]
 ;;
 
@@ -111,10 +112,10 @@ let%expect_test "test_factorial" =
 
 let%expect_test "test_nested_list_function" =
   pretty_printer_parse_and_infer "let f x = [ [x; x]; [x] ]";
-  [%expect {|
+  [%expect
+    {|
     val f: 'a -> 'a list list |}]
 ;;
-
 
 let%expect_test "test_fibonacci" =
   pretty_printer_parse_and_infer
