@@ -3,7 +3,10 @@
   ./001fac.ml
   ./003fib.ml
   ./010fac_anf.ml
+  ./004manyargs.ml
   ./010faccps_ll.ml
   ./010fibcps_ll.ml
+  ./012faccps.ml
+  ./012fibcps.ml
   %{exe:../../bin/DopsaML.exe}
   ../../bin/runtime.c))

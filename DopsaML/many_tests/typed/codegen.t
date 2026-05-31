@@ -46,3 +46,24 @@
   $ riscv64-linux-gnu-gcc -static prog.o runtime.o -o prog.exe
   $ qemu-riscv64 prog.exe
   8
+
+  $ ../../bin/DopsaML.exe 012faccps.ml
+  $ clang-18 --target=riscv64-linux-gnu -Wno-override-module -c out.ll -o prog.o
+  $ riscv64-linux-gnu-gcc -static prog.o runtime.o -o prog.exe
+  $ qemu-riscv64 prog.exe
+  720
+
+  $ ../../bin/DopsaML.exe 012fibcps.ml
+  $ clang-18 --target=riscv64-linux-gnu -Wno-override-module -c out.ll -o prog.o
+  $ riscv64-linux-gnu-gcc -static prog.o runtime.o -o prog.exe
+  $ qemu-riscv64 prog.exe
+  8
+
+  $ ../../bin/DopsaML.exe 004manyargs.ml
+  $ clang-18 --target=riscv64-linux-gnu -Wno-override-module -c out.ll -o prog.o
+  $ riscv64-linux-gnu-gcc -static prog.o runtime.o -o prog.exe
+  $ qemu-riscv64 prog.exe
+  1111111111
+  1
+  10
+  100

@@ -22,25 +22,84 @@ typedef struct {
     int64_t args[];
 } closure_t;
 
-static int64_t call_closure(closure_t *c) {
-    switch (c->arity) {
-    case 1:
-        return ((int64_t (*)(int64_t))c->func)(c->args[0]);
-    case 2:
-        return ((int64_t (*)(int64_t, int64_t))c->func)(c->args[0], c->args[1]);
-    case 3:
-        return ((int64_t (*)(int64_t, int64_t, int64_t))c->func)(
-            c->args[0], c->args[1], c->args[2]);
-    case 4:
-        return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t))c->func)(
-            c->args[0], c->args[1], c->args[2], c->args[3]);
-    case 5:
-        return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t))c->func)(
-            c->args[0], c->args[1], c->args[2], c->args[3], c->args[4]);
-    default:
-        abort();
-    }
+int64_t call_closure(closure_t *c);
+
+/* runtime.c is also compiled for the host (dune foreign_stubs), so the RISC-V
+   trampoline must be guarded out there. */
+#if defined(__riscv) && __riscv_xlen == 64
+__asm__(
+    "    .text\n"
+    "    .globl call_closure\n"
+    "call_closure:\n"
+    "    addi sp, sp, -48\n"          /* save callee-saved regs + ra */
+    "    sd   ra, 40(sp)\n"
+    "    sd   s0, 32(sp)\n"
+    "    sd   s1, 24(sp)\n"
+    "    sd   s2, 16(sp)\n"
+    "    sd   s3, 8(sp)\n"
+    "    addi s0, sp, 48\n"           /* s0 = sp on entry (frame anchor) */
+    "    ld   s1, 0(a0)\n"            /* s1 = func */
+    "    lw   s2, 8(a0)\n"            /* s2 = arity */
+    "    addi s3, a0, 16\n"           /* s3 = &args[0] */
+    /* push args[8..] onto the stack when arity > 8 */
+    "    li   t0, 8\n"
+    "    ble  s2, t0, 2f\n"
+    "    sub  t1, s2, t0\n"           /* t1 = number of stack args */
+    "    slli t2, t1, 3\n"            /* bytes = stack args * 8 */
+    "    addi t2, t2, 15\n"           /* round up to a multiple of 16 */
+    "    andi t2, t2, -16\n"
+    "    sub  sp, sp, t2\n"
+    "    addi t3, s3, 64\n"           /* t3 = &args[8] */
+    "    mv   t4, sp\n"
+    "1:\n"
+    "    ld   t5, 0(t3)\n"
+    "    sd   t5, 0(t4)\n"
+    "    addi t3, t3, 8\n"
+    "    addi t4, t4, 8\n"
+    "    addi t1, t1, -1\n"
+    "    bnez t1, 1b\n"
+    "2:\n"
+    /* load the first 8 args into a0-a7, guarded by arity */
+    "    li   t0, 1\n"
+    "    blt  s2, t0, 3f\n"
+    "    ld   a0, 0(s3)\n"
+    "    li   t0, 2\n"
+    "    blt  s2, t0, 3f\n"
+    "    ld   a1, 8(s3)\n"
+    "    li   t0, 3\n"
+    "    blt  s2, t0, 3f\n"
+    "    ld   a2, 16(s3)\n"
+    "    li   t0, 4\n"
+    "    blt  s2, t0, 3f\n"
+    "    ld   a3, 24(s3)\n"
+    "    li   t0, 5\n"
+    "    blt  s2, t0, 3f\n"
+    "    ld   a4, 32(s3)\n"
+    "    li   t0, 6\n"
+    "    blt  s2, t0, 3f\n"
+    "    ld   a5, 40(s3)\n"
+    "    li   t0, 7\n"
+    "    blt  s2, t0, 3f\n"
+    "    ld   a6, 48(s3)\n"
+    "    li   t0, 8\n"
+    "    blt  s2, t0, 3f\n"
+    "    ld   a7, 56(s3)\n"
+    "3:\n"
+    "    jalr s1\n"                   /* call; result lands in a0 */
+    "    ld   ra, -8(s0)\n"           /* restore saved regs via the anchor */
+    "    ld   s1, -24(s0)\n"
+    "    ld   s2, -32(s0)\n"
+    "    ld   s3, -40(s0)\n"
+    "    ld   t0, -16(s0)\n"          /* caller's s0 */
+    "    mv   sp, s0\n"               /* drop frame + any stack args */
+    "    mv   s0, t0\n"
+    "    ret\n");
+#else
+int64_t call_closure(closure_t *c) {
+    (void)c;
+    abort();
 }
+#endif
 
 int64_t make_closure(int64_t fptr, int32_t arity) {
     closure_t *c = malloc(sizeof(closure_t));
