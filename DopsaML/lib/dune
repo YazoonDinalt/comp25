@@ -1,7 +1,7 @@
 (library
  (name DopsaML_lib)
  (public_name DopsaML.Lib)
- (modules Ast Parser Inferencer Ty Codegen)
+ (modules Ast Parser Inferencer Ty Anf Codegen)
  (libraries base angstrom llvm)
  (preprocess
   (pps ppx_expect ppx_deriving.show ppx_deriving.eq))

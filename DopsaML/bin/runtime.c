@@ -4,7 +4,8 @@
 #include <stdint.h>
 #include <stdio.h>
 
-void print_int(int64_t n) {
+int64_t print_int(int64_t n) {
     printf("%lld\n", (long long)n);
     fflush(stdout);
+    return 0;
 }

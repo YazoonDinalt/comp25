@@ -29,26 +29,24 @@ type ty =
 [@@deriving show { with_path = false }]
 
 let normalize_ty_vars ty =
-  let var_map = ref VarMap.empty in
-  let next_var = ref 0 in
   let rec collect_vars acc = function
     | TVar x -> VarSet.add x acc
     | TArrow (l, r) -> collect_vars (collect_vars acc l) r
     | TList t -> collect_vars acc t
-    | TTuple ts -> List.fold_left (fun acc t -> collect_vars acc t) acc ts
+    | TTuple ts -> List.fold_left collect_vars acc ts
     | TPrim _ -> acc
   in
   let vars = collect_vars VarSet.empty ty in
   let sorted_vars = List.sort Int.compare (VarSet.elements vars) in
-  (* Создаем mapping *)
-  List.iter
-    (fun var ->
-       var_map := VarMap.add var !next_var !var_map;
-       incr next_var)
-    sorted_vars;
+  let var_map, _ =
+    List.fold_left
+      (fun (m, i) var -> VarMap.add var i m, i + 1)
+      (VarMap.empty, 0)
+      sorted_vars
+  in
   let rec normalize = function
     | TVar x ->
-      (match VarMap.find_opt x !var_map with
+      (match VarMap.find_opt x var_map with
        | Some new_var -> TVar new_var
        | None -> TVar x)
     | TArrow (l, r) -> TArrow (normalize l, normalize r)
@@ -93,6 +91,7 @@ type error =
   | `Unification_failed of ty * ty
   | `Not_solo_var
   | `Bad_let
+  | `Bad_annotation
   ]
 
 let pp_error_infer fmt = function
@@ -110,6 +109,8 @@ let pp_error_infer fmt = function
       r
   | `Not_solo_var -> Stdlib.Format.fprintf fmt "Invalid let rec usage"
   | `Bad_let -> Stdlib.Format.fprintf fmt "Typechecker error: empty pattern"
+  | `Bad_annotation ->
+    Stdlib.Format.fprintf fmt "Typechecker error: unknown type annotation"
 ;;
 
 type scheme = S of binder_set * ty [@@deriving show { with_path = false }]

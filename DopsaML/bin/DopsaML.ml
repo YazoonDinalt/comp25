@@ -43,5 +43,10 @@ let () =
   | Error msg ->
     Printf.eprintf "Parse error: %s\n" msg;
     exit 1
-  | Ok stmts -> Codegen.codegen_program stmts output_file
+  | Ok stmts ->
+    (match Codegen.codegen_program (Anf.anf_program stmts) output_file with
+     | Error msg ->
+       Printf.eprintf "Codegen error: %s\n" msg;
+       exit 1
+     | Ok () -> ())
 ;;

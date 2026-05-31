@@ -87,7 +87,7 @@ let parse_bool =
 
 let parse_uint =
   let pd = parse_white_space *> take_while1 is_digit in
-  lift (fun digit -> ConstInt (Int.of_string @@ digit)) pd
+  lift (fun digit -> ConstInt (Int.of_string digit)) pd
 ;;
 
 let parse_int =

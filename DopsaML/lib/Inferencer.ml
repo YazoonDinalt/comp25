@@ -81,8 +81,7 @@ type fresh = int
 module Type = struct
   type t = ty
 
-  let rec occurs_check var typ =
-    match typ with
+  let rec occurs_check var = function
     | TVar id -> Int.equal id var
     | TArrow (lhs, rhs) -> occurs_check var lhs || occurs_check var rhs
     | TList elem -> occurs_check var elem
@@ -282,16 +281,20 @@ let generalize_recursive env ty x =
 ;;
 
 let rec ty_from_annotation = function
-  | TypeInt -> int_typ
-  | TypeBool -> bool_typ
-  | TypeArrow (a1, a2) -> arrow (ty_from_annotation a1) (ty_from_annotation a2)
-  | TypeUnknown -> failwith "TypeUnknown"
+  | TypeInt -> return int_typ
+  | TypeBool -> return bool_typ
+  | TypeArrow (a1, a2) ->
+    let* t1 = ty_from_annotation a1 in
+    let* t2 = ty_from_annotation a2 in
+    return (arrow t1 t2)
+  | TypeUnknown -> fail `Bad_annotation
 ;;
 
 let unify_annotation an ty =
   match an with
   | Some an ->
-    let* sub = Subst.unify_types (ty_from_annotation an) ty in
+    let* ann_ty = ty_from_annotation an in
+    let* sub = Subst.unify_types ann_ty ty in
     return (Subst.apply_subst sub ty)
   | None -> return ty
 ;;
@@ -300,8 +303,7 @@ open InferState
 
 let infer_pattern =
   let open InferState.Syntax in
-  let rec infer env pat =
-    match pat with
+  let rec infer env = function
     | PatWild ->
       let* var_ty = fresh_var in
       return (env, var_ty)
@@ -319,7 +321,8 @@ let infer_pattern =
       let* ty_var = fresh_var in
       let env' = TypeEnv.extend env (name, S (VarSet.empty, ty_var)) in
       let* _, ty_actual = return (env', ty_var) in
-      let* sub = Subst.unify_types ty_actual (ty_from_annotation annot) in
+      let* ann_ty = ty_from_annotation annot in
+      let* sub = Subst.unify_types ty_actual ann_ty in
       let env_final = TypeEnv.apply_subst sub env' in
       return (env_final, Subst.apply_subst sub ty_actual)
     | PatCon (hd, tl) ->
@@ -369,8 +372,7 @@ let infer_expression =
     let* sub = Subst.compose_many subs in
     return (sub, Subst.apply_subst sub ty)
   in
-  let rec infer env expr =
-    match expr with
+  let rec infer env = function
     | ExpConst (ConstInt _) -> return (Subst.empty, int_typ)
     | ExpConst (ConstBool _) -> return (Subst.empty, bool_typ)
     | ExpConst ConstNil ->
@@ -385,7 +387,8 @@ let infer_expression =
        | None -> fail (`No_variable x))
     | ExpVar (name, annot) ->
       let* sub1, ty1 = infer env (ExpVar (name, TypeUnknown)) in
-      let* sub2 = Subst.unify_types ty1 (ty_from_annotation annot) in
+      let* ann_ty = ty_from_annotation annot in
+      let* sub2 = Subst.unify_types ty1 ann_ty in
       compose_and_apply [ sub1; sub2 ] ty1
     | ExpIfElse (cond, t_branch, e_branch) ->
       let* s1, t_cond = infer env cond in
@@ -457,7 +460,8 @@ let infer_expression =
       return (s_final, Subst.apply_subst s_final res_ty)
     | ExpApp (f, arg, annot) ->
       let* s1, t1 = infer env (ExpApp (f, arg, TypeUnknown)) in
-      let* s2 = Subst.unify_types t1 (ty_from_annotation annot) in
+      let* ann_ty = ty_from_annotation annot in
+      let* s2 = Subst.unify_types t1 ann_ty in
       compose_and_apply [ s1; s2 ] t1
     | ExpBinaryOp (op, e1, e2) ->
       let op_name = op_str op in
