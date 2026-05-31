@@ -44,11 +44,12 @@ let () =
     Printf.eprintf "Parse error: %s\n" msg;
     exit 1
   | Ok stmts ->
-    (match
-       Codegen.codegen_program
-         (Anf.anf_program (Ll.ll_program (Cc.cc_program stmts)))
-         output_file
-     with
+    let result =
+      match Anf.anf_program (Ll.ll_program (Cc.cc_program stmts)) with
+      | Error msg -> Error msg
+      | Ok prog -> Codegen.codegen_program prog output_file
+    in
+    (match result with
      | Error msg ->
        Printf.eprintf "Codegen error: %s\n" msg;
        exit 1

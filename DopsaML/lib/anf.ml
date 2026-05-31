@@ -4,98 +4,134 @@
 
 open Ast
 
-type 'a m = int -> 'a * int
+(* ANF: every operand is an immediate, every intermediate result is named *)
 
-let return x : 'a m = fun s -> x, s
+type imm =
+  | ImmInt of int
+  | ImmBool of bool
+  | ImmUnit
+  | ImmVar of string
+
+type cexpr =
+  | CImm of imm
+  | CBinop of binary_op * imm * imm
+  | CApp of string * imm list (* call of a named function/closure *)
+  | CIf of imm * aexpr * aexpr
+
+and aexpr =
+  | ALet of string * cexpr * aexpr
+  | ACExpr of cexpr
+
+type afunc =
+  { name : string
+  ; is_rec : bool
+  ; params : string list
+  ; body : aexpr
+  }
+
+type aprogram = afunc list
+
+(* state (fresh-name counter) + error monad *)
+type 'a m = int -> ('a, string) result * int
+
+let return x : 'a m = fun s -> Ok x, s
+let fail msg : 'a m = fun s -> Error msg, s
 
 let ( let* ) (m : 'a m) (f : 'a -> 'b m) : 'b m =
   fun s ->
-  let x, s' = m s in
-  f x s'
+  match m s with
+  | Ok x, s' -> f x s'
+  | (Error _ as e), s' -> e, s'
 ;;
 
-let fresh : string m = fun s -> Printf.sprintf "anf%d" s, s + 1
-let run (m : 'a m) : 'a = fst (m 0)
+let fresh : string m = fun s -> Ok (Printf.sprintf "anf%d" s), s + 1
+let run (m : 'a m) = fst (m 0)
 
-let is_atom = function
-  | ExpConst _ | ExpVar _ -> true
-  | _ -> false
+let rec unwrap_params = function
+  | ExpFun (PatVar (name, _), rest) ->
+    let params, inner = unwrap_params rest in
+    name :: params, inner
+  | e -> [], e
 ;;
 
-let rec collect_app_chain = function
-  | ExpApp (f, arg, t) ->
-    let func, args = collect_app_chain f in
-    func, args @ [ arg, t ]
-  | e -> e, []
-;;
-
-let rec anf_expr expr (k : expression -> expression m) : expression m =
-  match expr with
-  | ExpConst _ | ExpVar _ -> k expr
-  | ExpFun (pat, body) ->
-    let* body_anf = anf_body body in
-    k (ExpFun (pat, body_anf))
-  | ExpBinaryOp (op, e1, e2) ->
-    anf_atom e1 (fun a1 -> anf_atom e2 (fun a2 -> k (ExpBinaryOp (op, a1, a2))))
-  | ExpApp _ as app ->
-    let func, args = collect_app_chain app in
-    let norm_func cont =
-      match func with
-      | ExpVar _ -> cont func
-      | ExpFun (pat, body) ->
-        let* body_anf = anf_body body in
-        cont (ExpFun (pat, body_anf))
-      | _ -> anf_atom func cont
-    in
-    norm_func (fun af ->
-      anf_atom_list args (fun anf_args ->
-        let rebuilt = List.fold_left (fun f (arg, t) -> ExpApp (f, arg, t)) af anf_args in
-        k rebuilt))
-  | ExpIfElse (cond, then_, else_) ->
-    anf_atom cond (fun ac ->
-      let* then_anf = anf_body then_ in
-      let* else_anf = anf_body else_ in
-      k (ExpIfElse (ac, then_anf, else_anf)))
-  | ExpLetIn (rf, name, e1, e2) ->
-    anf_expr e1 (fun v1 ->
-      let* e2_anf = anf_expr e2 k in
-      return (ExpLetIn (rf, name, v1, e2_anf)))
-  | ExpLetPatIn (pat, e1, e2) ->
-    anf_expr e1 (fun v1 ->
-      let* e2_anf = anf_expr e2 k in
-      return (ExpLetPatIn (pat, v1, e2_anf)))
-  | e -> k e
-
-and anf_body expr : expression m = anf_expr expr return
-
-and anf_atom expr (k : expression -> expression m) : expression m =
-  match expr with
-  | ExpConst _ | ExpVar _ -> k expr
-  | ExpFun (pat, body) ->
-    let* body_anf = anf_body body in
-    k (ExpFun (pat, body_anf))
+(* e -> its value as an immediate, passed to k *)
+let rec anf_imm e (k : imm -> aexpr m) : aexpr m =
+  match e with
+  | ExpConst (ConstInt n) -> k (ImmInt n)
+  | ExpConst (ConstBool b) -> k (ImmBool b)
+  | ExpConst ConstNil -> k ImmUnit
+  | ExpVar ("()", _) -> k ImmUnit
+  | ExpVar (x, _) -> k (ImmVar x)
   | _ ->
-    anf_expr expr (fun v ->
-      if is_atom v
-      then k v
-      else
-        let* tmp = fresh in
-        let* rest = k (ExpVar (tmp, TypeUnknown)) in
-        return (ExpLetIn (Notrec, tmp, v, rest)))
+    let* t = fresh in
+    let* rest = k (ImmVar t) in
+    anf_cexpr e (fun c -> return (ALet (t, c, rest)))
 
-and anf_atom_list lst (k : (expression * type_of_var) list -> expression m) : expression m
-  =
-  match lst with
+(* same, but forces a var name (the callee has to be one) *)
+and anf_imm_var e (k : string -> aexpr m) : aexpr m =
+  anf_imm e (fun i ->
+    match i with
+    | ImmVar x -> k x
+    | _ ->
+      let* t = fresh in
+      let* rest = k t in
+      return (ALet (t, CImm i, rest)))
+
+and anf_imm_list es (k : imm list -> aexpr m) : aexpr m =
+  match es with
   | [] -> k []
-  | (arg, t) :: rest ->
-    anf_atom arg (fun a -> anf_atom_list rest (fun rest_anf -> k ((a, t) :: rest_anf)))
+  | e :: rest -> anf_imm e (fun i -> anf_imm_list rest (fun is -> k (i :: is)))
+
+and anf_cexpr e (k : cexpr -> aexpr m) : aexpr m =
+  match e with
+  | ExpConst _ | ExpVar _ -> anf_imm e (fun i -> k (CImm i))
+  | ExpBinaryOp (op, l, r) ->
+    anf_imm l (fun il -> anf_imm r (fun ir -> k (CBinop (op, il, ir))))
+  | ExpIfElse (c, t, e) ->
+    anf_imm c (fun ic ->
+      let* t' = anf_aexpr t in
+      let* e' = anf_aexpr e in
+      k (CIf (ic, t', e')))
+  | ExpLetIn (_, name, e1, e2) ->
+    anf_cexpr e1 (fun c1 ->
+      let* rest = anf_cexpr e2 k in
+      return (ALet (name, c1, rest)))
+  | ExpApp _ ->
+    let rec collect acc = function
+      | ExpApp (f, arg, _) -> collect (arg :: acc) f
+      | f -> f, acc
+    in
+    let head, args = collect [] e in
+    anf_imm_var head (fun f -> anf_imm_list args (fun iargs -> k (CApp (f, iargs))))
+  | _ -> fail "ANF: unsupported expression"
+
+(* tail position: e's value becomes the aexpr's value *)
+and anf_aexpr e : aexpr m = anf_cexpr e (fun c -> return (ACExpr c))
+
+let anf_func = function
+  | Let (rf, [ (PatVar (name, _), body) ]) ->
+    let params, inner = unwrap_params body in
+    let is_rec =
+      match rf with
+      | Rec -> true
+      | Notrec -> false
+    in
+    (match run (anf_aexpr inner) with
+     | Ok body -> Ok (Some { name; is_rec; params; body })
+     | Error e -> Error e)
+  | _ -> Ok None
 ;;
 
-let anf_binding = function
-  | Let (rf, pats) ->
-    List.map (fun (pat, expr) -> pat, run (anf_body expr)) pats
-    |> fun pats -> Let (rf, pats)
-  | Exp e -> Exp (run (anf_body e))
+let anf_program stmts =
+  List.fold_left
+    (fun acc stmt ->
+       match acc with
+       | Error _ as e -> e
+       | Ok funcs ->
+         (match anf_func stmt with
+          | Error _ as e -> e
+          | Ok None -> Ok funcs
+          | Ok (Some f) -> Ok (funcs @ [ f ])))
+    (Ok [])
+    stmts
 ;;
-
-let anf_program stmts = List.map anf_binding stmts

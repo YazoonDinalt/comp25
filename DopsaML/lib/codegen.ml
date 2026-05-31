@@ -3,6 +3,7 @@
 (** SPDX-License-Identifier: LGPL-3.0-or-later *)
 
 open Ast
+open Anf
 module StringMap = Map.Make (String)
 
 type arities = int StringMap.t
@@ -10,38 +11,6 @@ type arities = int StringMap.t
 (* runtime functions the language can call, all int -> int *)
 let builtins =
   [ "print_int"; "collect"; "print_gc_status"; "get_heap_start"; "get_heap_fin" ]
-;;
-
-type cfunc =
-  { name : string
-  ; is_rec : bool
-  ; params : string list
-  ; body : expression
-  }
-
-let rec unwrap_params = function
-  | ExpFun (PatVar (name, _), rest) ->
-    let params, inner = unwrap_params rest in
-    name :: params, inner
-  | e -> [], e
-;;
-
-let collect_arities stmts =
-  List.fold_left
-    (fun acc -> function
-       | Let (_, pats) ->
-         List.fold_left
-           (fun acc (pat, expr) ->
-              match pat with
-              | PatVar (name, _) ->
-                let params, _ = unwrap_params expr in
-                StringMap.add name (List.length params) acc
-              | _ -> acc)
-           acc
-           pats
-       | _ -> acc)
-    (List.fold_left (fun m name -> StringMap.add name 1 m) StringMap.empty builtins)
-    stmts
 ;;
 
 let ( let* ) = Result.bind
@@ -54,18 +23,6 @@ let map_result f lst =
        Ok (v :: acc))
     lst
     (Ok [])
-;;
-
-let func_of_binding = function
-  | Let (rf, [ (PatVar (name, _), body) ]) ->
-    let params, inner = unwrap_params body in
-    let is_rec =
-      match rf with
-      | Rec -> true
-      | Notrec -> false
-    in
-    Some { name; is_rec; params; body = inner }
-  | _ -> None
 ;;
 
 let context = Llvm.global_context ()
@@ -133,23 +90,36 @@ let build_closure_of fname arity =
   build_make_closure fn_ptr arity
 ;;
 
-let rec codegen_expr arities (env : env) (func : Llvm.llvalue) = function
-  | ExpConst (ConstInt n) -> Ok (tag_int n)
-  | ExpConst (ConstBool b) -> Ok (i64v (if b then 3 else 1))
-  | ExpConst _ -> Ok (i64v 1)
-  | ExpVar ("()", _) -> Ok (i64v 1) (* unit *)
-  | ExpVar (name, _) when Hashtbl.mem env name -> env_get env name
-  | ExpVar (name, _) ->
-    (* a top-level function used as a value -> closure *)
-    let arity =
-      match StringMap.find_opt name arities with
-      | Some a -> a
-      | None -> 1
-    in
-    build_closure_of name arity
-  | ExpBinaryOp (op, e1, e2) ->
-    let* l = codegen_expr arities env func e1 in
-    let* r = codegen_expr arities env func e2 in
+let arity_of arities name =
+  match StringMap.find_opt name arities with
+  | Some a -> a
+  | None -> 1
+;;
+
+let codegen_imm arities (env : env) = function
+  | ImmInt n -> Ok (tag_int n)
+  | ImmBool b -> Ok (i64v (if b then 3 else 1))
+  | ImmUnit -> Ok (i64v 1)
+  | ImmVar x when Hashtbl.mem env x -> env_get env x
+  (* a top-level function used as a value -> closure *)
+  | ImmVar x -> build_closure_of x (arity_of arities x)
+;;
+
+(* apply [args] to [start] one at a time through the runtime *)
+let apply_chain start args =
+  List.fold_left
+    (fun acc av ->
+       let* fv = acc in
+       build_apply fv av)
+    start
+    args
+;;
+
+let rec codegen_cexpr arities (env : env) (func : Llvm.llvalue) = function
+  | CImm i -> codegen_imm arities env i
+  | CBinop (op, le, re) ->
+    let* l = codegen_imm arities env le in
+    let* r = codegen_imm arities env re in
     let bool_op icmp_op =
       Llvm.build_select
         (Llvm.build_icmp icmp_op l r "cmp" builder)
@@ -172,69 +142,59 @@ let rec codegen_expr arities (env : env) (func : Llvm.llvalue) = function
        | Greq -> bool_op Llvm.Icmp.Sge
        | And -> Llvm.build_and l r "and" builder
        | Or -> Llvm.build_or l r "or" builder)
-  | ExpIfElse (cond_expr, then_expr, else_expr) ->
-    let* cond_val = codegen_expr arities env func cond_expr in
+  | CApp (f, args) ->
+    let* argvals = map_result (codegen_imm arities env) args in
+    if Hashtbl.mem env f
+    then apply_chain (env_get env f) argvals (* local closure *)
+    else (
+      let arity = arity_of arities f in
+      if List.length args = arity
+      then
+        (* exact arity: direct call *)
+        let* callee = lookup_func f in
+        let ft = Llvm.function_type i64_t (Array.make arity i64_t) in
+        Ok (Llvm.build_call ft callee (Array.of_list argvals) "call" builder)
+      else apply_chain (build_closure_of f arity) argvals)
+  | CIf (cond, then_a, else_a) ->
+    let* cond_val = codegen_imm arities env cond in
     let cond_bool = ensure_i1 cond_val in
     let then_bb = Llvm.append_block context "then" func in
     let else_bb = Llvm.append_block context "else" func in
     let merge_bb = Llvm.append_block context "merge" func in
     let _ = Llvm.build_cond_br cond_bool then_bb else_bb builder in
     Llvm.position_at_end then_bb builder;
-    let* then_val = codegen_expr arities env func then_expr in
+    let* then_val = codegen_aexpr arities env func then_a in
     let then_exit = Llvm.insertion_block builder in
     let _ = Llvm.build_br merge_bb builder in
     Llvm.position_at_end else_bb builder;
-    let* else_val = codegen_expr arities env func else_expr in
+    let* else_val = codegen_aexpr arities env func else_a in
     let else_exit = Llvm.insertion_block builder in
     let _ = Llvm.build_br merge_bb builder in
     Llvm.position_at_end merge_bb builder;
     Ok (Llvm.build_phi [ then_val, then_exit; else_val, else_exit ] "ifresult" builder)
-  | ExpLetIn (_, name, e1, e2) ->
-    let* v = codegen_expr arities env func e1 in
+
+and codegen_aexpr arities (env : env) (func : Llvm.llvalue) = function
+  | ACExpr c -> codegen_cexpr arities env func c
+  | ALet (name, c, rest) ->
+    let* v = codegen_cexpr arities env func c in
     env_set env name v;
-    codegen_expr arities env func e2
-  | ExpApp _ as app ->
-    let rec collect acc = function
-      | ExpApp (f, arg, _) -> collect (arg :: acc) f
-      | ExpVar (name, _) -> Ok (name, acc)
-      | e -> Error (Printf.sprintf "Unsupported function expr: %s" (show_expression e))
-    in
-    let* fname, args = collect [] app in
-    let apply_args start =
-      List.fold_left
-        (fun acc arg ->
-           let* fv = acc in
-           let* av = codegen_expr arities env func arg in
-           build_apply fv av)
-        start
-        args
-    in
-    if Hashtbl.mem env fname
-    then apply_args (env_get env fname) (* local closure: apply args one by one *)
-    else (
-      let arity =
-        match StringMap.find_opt fname arities with
-        | Some a -> a
-        | None -> List.length args
-      in
-      if List.length args = arity
-      then
-        (* saturated call to a known function: direct LLVM call *)
-        let* callee = lookup_func fname in
-        let* arg_vals = map_result (codegen_expr arities env func) args in
-        let ft = Llvm.function_type i64_t (Array.make arity i64_t) in
-        Ok (Llvm.build_call ft callee (Array.of_list arg_vals) "call" builder)
-      else apply_args (build_closure_of fname arity))
-  | e -> Error (Printf.sprintf "Unsupported expression: %s" (show_expression e))
+    codegen_aexpr arities env func rest
 ;;
 
-let codegen_func arities (cfunc : cfunc) =
-  let n = List.length cfunc.params in
+let collect_arities (prog : aprogram) =
+  List.fold_left
+    (fun m (f : afunc) -> StringMap.add f.name (List.length f.params) m)
+    (List.fold_left (fun m name -> StringMap.add name 1 m) StringMap.empty builtins)
+    prog
+;;
+
+let codegen_func arities (f : afunc) =
+  let n = List.length f.params in
   let ft = Llvm.function_type i64_t (Array.make n i64_t) in
   let fn =
-    match Llvm.lookup_function cfunc.name the_module with
-    | Some f -> f
-    | None -> Llvm.declare_function cfunc.name ft the_module
+    match Llvm.lookup_function f.name the_module with
+    | Some x -> x
+    | None -> Llvm.declare_function f.name ft the_module
   in
   let entry_bb = Llvm.append_block context "entry" fn in
   Llvm.position_at_end entry_bb builder;
@@ -244,13 +204,13 @@ let codegen_func arities (cfunc : cfunc) =
        let p = (Llvm.params fn).(i) in
        Llvm.set_value_name pname p;
        env_set env pname p)
-    cfunc.params;
-  let* result = codegen_expr arities env fn cfunc.body in
+    f.params;
+  let* result = codegen_aexpr arities env fn f.body in
   let _ = Llvm.build_ret result builder in
   Ok fn
 ;;
 
-let codegen_main arities (cfunc : cfunc) =
+let codegen_main arities (f : afunc) =
   let ft = Llvm.function_type i32_t [||] in
   let fn = Llvm.define_function "main" ft the_module in
   let entry_bb = Llvm.entry_block fn in
@@ -258,38 +218,37 @@ let codegen_main arities (cfunc : cfunc) =
   let* gc_init_fn = lookup_func "gc_init" in
   let _ = Llvm.build_call gc_init_ft gc_init_fn [||] "" builder in
   let env = new_env () in
-  let* result = codegen_expr arities env fn cfunc.body in
+  let* result = codegen_aexpr arities env fn f.body in
   let untagged = Llvm.build_ashr result (i64v 1) "untag" builder in
   let result_i32 = Llvm.build_trunc untagged i32_t "exitcode" builder in
   let _ = Llvm.build_ret result_i32 builder in
   Ok fn
 ;;
 
-let codegen_cfunc arities (cfunc : cfunc) =
-  if cfunc.name = "main"
+let codegen_cfunc arities (f : afunc) =
+  if f.name = "main"
   then
-    let* _ = codegen_main arities cfunc in
+    let* _ = codegen_main arities f in
     Ok ()
-  else if cfunc.is_rec
+  else if f.is_rec
   then (
-    let n = List.length cfunc.params in
+    let n = List.length f.params in
     let ft = Llvm.function_type i64_t (Array.make n i64_t) in
-    match Llvm.lookup_function cfunc.name the_module with
+    match Llvm.lookup_function f.name the_module with
     | None ->
-      let _ = Llvm.declare_function cfunc.name ft the_module in
-      let* _ = codegen_func arities cfunc in
+      let _ = Llvm.declare_function f.name ft the_module in
+      let* _ = codegen_func arities f in
       Ok ()
     | Some _ ->
-      let* _ = codegen_func arities cfunc in
+      let* _ = codegen_func arities f in
       Ok ())
   else
-    let* _ = codegen_func arities cfunc in
+    let* _ = codegen_func arities f in
     Ok ()
 ;;
 
-let codegen_program stmts output_file =
-  let arities = collect_arities stmts in
-  let prog = List.filter_map func_of_binding stmts in
+let codegen_program (prog : aprogram) output_file =
+  let arities = collect_arities prog in
   List.iter
     (fun name ->
        let (_ : Llvm.llvalue) = Llvm.declare_function name builtin_ft the_module in
@@ -299,22 +258,22 @@ let codegen_program stmts output_file =
   let _ = Llvm.declare_function "apply" apply_ft the_module in
   let _ = Llvm.declare_function "gc_init" gc_init_ft the_module in
   List.iter
-    (fun (cfunc : cfunc) ->
-       if cfunc.name <> "main"
+    (fun (f : afunc) ->
+       if f.name <> "main"
        then (
-         let n = List.length cfunc.params in
+         let n = List.length f.params in
          let ft = Llvm.function_type i64_t (Array.make n i64_t) in
-         match Llvm.lookup_function cfunc.name the_module with
+         match Llvm.lookup_function f.name the_module with
          | None ->
-           let _ = Llvm.declare_function cfunc.name ft the_module in
+           let _ = Llvm.declare_function f.name ft the_module in
            ()
          | Some _ -> ()))
     prog;
   let* () =
     List.fold_left
-      (fun acc cfunc ->
+      (fun acc f ->
          let* () = acc in
-         codegen_cfunc arities cfunc)
+         codegen_cfunc arities f)
       (Ok ())
       prog
   in
