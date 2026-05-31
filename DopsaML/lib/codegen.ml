@@ -7,6 +7,11 @@ module StringMap = Map.Make (String)
 
 type arities = int StringMap.t
 
+(* runtime functions the language can call, all int -> int *)
+let builtins =
+  [ "print_int"; "collect"; "print_gc_status"; "get_heap_start"; "get_heap_fin" ]
+;;
+
 type cfunc =
   { name : string
   ; is_rec : bool
@@ -35,7 +40,7 @@ let collect_arities stmts =
            acc
            pats
        | _ -> acc)
-    (StringMap.add "print_int" 1 StringMap.empty)
+    (List.fold_left (fun m name -> StringMap.add name 1 m) StringMap.empty builtins)
     stmts
 ;;
 
@@ -77,8 +82,11 @@ let retag v =
   Llvm.build_or (Llvm.build_shl v (i64v 1) "shl" builder) (i64v 1) "tag" builder
 ;;
 
+let void_t = Llvm.void_type context
 let make_closure_ft = Llvm.function_type i64_t [| i64_t; i32_t |]
 let apply_ft = Llvm.function_type i64_t [| i64_t; i64_t |]
+let builtin_ft = Llvm.function_type i64_t [| i64_t |]
+let gc_init_ft = Llvm.function_type void_t [||]
 
 type env = (string, Llvm.llvalue) Hashtbl.t
 
@@ -129,9 +137,10 @@ let rec codegen_expr arities (env : env) (func : Llvm.llvalue) = function
   | ExpConst (ConstInt n) -> Ok (tag_int n)
   | ExpConst (ConstBool b) -> Ok (i64v (if b then 3 else 1))
   | ExpConst _ -> Ok (i64v 1)
+  | ExpVar ("()", _) -> Ok (i64v 1) (* unit *)
   | ExpVar (name, _) when Hashtbl.mem env name -> env_get env name
   | ExpVar (name, _) ->
-    (* a global function used as a value becomes a closure *)
+    (* a top-level function used as a value -> closure *)
     let arity =
       match StringMap.find_opt name arities with
       | Some a -> a
@@ -246,6 +255,8 @@ let codegen_main arities (cfunc : cfunc) =
   let fn = Llvm.define_function "main" ft the_module in
   let entry_bb = Llvm.entry_block fn in
   Llvm.position_at_end entry_bb builder;
+  let* gc_init_fn = lookup_func "gc_init" in
+  let _ = Llvm.build_call gc_init_ft gc_init_fn [||] "" builder in
   let env = new_env () in
   let* result = codegen_expr arities env fn cfunc.body in
   let untagged = Llvm.build_ashr result (i64v 1) "untag" builder in
@@ -279,11 +290,14 @@ let codegen_cfunc arities (cfunc : cfunc) =
 let codegen_program stmts output_file =
   let arities = collect_arities stmts in
   let prog = List.filter_map func_of_binding stmts in
-  let _ =
-    Llvm.declare_function "print_int" (Llvm.function_type i64_t [| i64_t |]) the_module
-  in
+  List.iter
+    (fun name ->
+       let (_ : Llvm.llvalue) = Llvm.declare_function name builtin_ft the_module in
+       ())
+    builtins;
   let _ = Llvm.declare_function "make_closure" make_closure_ft the_module in
   let _ = Llvm.declare_function "apply" apply_ft the_module in
+  let _ = Llvm.declare_function "gc_init" gc_init_ft the_module in
   List.iter
     (fun (cfunc : cfunc) ->
        if cfunc.name <> "main"
