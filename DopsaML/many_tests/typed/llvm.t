@@ -1,0 +1,16 @@
+  $ ../../bin/DopsaML.exe manytests/typed/001fac.ml -o /dev/null
+  $ ../../bin/DopsaML.exe manytests/typed/002fac.ml -o /dev/null
+  $ ../../bin/DopsaML.exe manytests/typed/003fib.ml -o /dev/null
+  $ ../../bin/DopsaML.exe manytests/typed/004manyargs.ml -o /dev/null
+  $ ../../bin/DopsaML.exe manytests/typed/005fix.ml -o /dev/null
+  $ ../../bin/DopsaML.exe manytests/typed/006partial.ml -o /dev/null
+  $ ../../bin/DopsaML.exe manytests/typed/006partial2.ml -o /dev/null
+  $ ../../bin/DopsaML.exe manytests/typed/006partial3.ml -o /dev/null
+  $ ../../bin/DopsaML.exe manytests/typed/007order.ml -o /dev/null
+  $ ../../bin/DopsaML.exe manytests/typed/008ascription.ml -o /dev/null
+  $ ../../bin/DopsaML.exe manytests/typed/009let_poly.ml -o /dev/null
+  $ ../../bin/DopsaML.exe manytests/typed/010fac_anf.ml -o /dev/null
+  $ ../../bin/DopsaML.exe manytests/typed/010faccps_ll.ml -o /dev/null
+  $ ../../bin/DopsaML.exe manytests/typed/010fibcps_ll.ml -o /dev/null
+  $ ../../bin/DopsaML.exe manytests/typed/012faccps.ml -o /dev/null
+  $ ../../bin/DopsaML.exe manytests/typed/012fibcps.ml -o /dev/null

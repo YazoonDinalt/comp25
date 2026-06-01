@@ -1,18 +1,7 @@
 (cram
  (deps
-  ./001fac.ml
-  ./003fib.ml
-  ./010fac_anf.ml
-  ./004manyargs.ml
-  ./010faccps_ll.ml
-  ./010fibcps_ll.ml
-  ./012faccps.ml
-  ./012fibcps.ml
-  ./gc_status.ml
-  ./gc_heap.ml
-  ./gc_survive.ml
-  ./tuple_simple.ml
-  ./tuple_fun.ml
-  ./tuple_gc.ml
+  (glob_files manytests/typed/*.ml)
+  (glob_files manytests/do_not_type/*.ml)
+  (glob_files *.ml)
   %{exe:../../bin/DopsaML.exe}
   ../../bin/runtime.c))
