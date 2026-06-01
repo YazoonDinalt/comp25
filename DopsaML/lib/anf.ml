@@ -11,6 +11,7 @@ type imm =
   | ImmBool of bool
   | ImmUnit
   | ImmVar of string
+[@@deriving show { with_path = false }]
 
 type cexpr =
   | CImm of imm
@@ -23,6 +24,7 @@ type cexpr =
 and aexpr =
   | ALet of string * cexpr * aexpr
   | ACExpr of cexpr
+[@@deriving show { with_path = false }]
 
 type afunc =
   { name : string
@@ -30,8 +32,9 @@ type afunc =
   ; params : string list
   ; body : aexpr
   }
+[@@deriving show { with_path = false }]
 
-type aprogram = afunc list
+type aprogram = afunc list [@@deriving show { with_path = false }]
 
 (* state (fresh-name counter) + error monad *)
 type 'a m = int -> ('a, string) result * int
