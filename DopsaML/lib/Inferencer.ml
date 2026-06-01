@@ -29,9 +29,23 @@ module InferState : sig
 
   val fresh : int t
   val peek_counter : int t
+
+  (* variable levels: a var is generalizable when its level is deeper than the
+     current one *)
+  val enter_level : unit t
+  val leave_level : unit t
+  val current_level : int t
+  val level_of : int -> int t
+  val lower_level : int -> int -> unit t
   val run_infer : 'a t -> ('a, error) Result.t
 end = struct
-  type 'a t = { run : int -> int * ('a, error) Result.t }
+  type st =
+    { counter : int
+    ; level : int
+    ; levels : (int, int, Int.comparator_witness) Map.t
+    }
+
+  type 'a t = { run : st -> st * ('a, error) Result.t }
 
   let run m = m.run
   let return x = { run = (fun st -> st, Result.return x) }
@@ -71,9 +85,35 @@ end = struct
     ;;
   end
 
-  let fresh = { run = (fun last -> last + 1, Ok last) }
-  let peek_counter = { run = (fun last -> last, Ok last) }
-  let run_infer m = snd (run m 0)
+  let fresh =
+    { run =
+        (fun st ->
+          let id = st.counter in
+          ( { st with counter = id + 1; levels = Map.set st.levels ~key:id ~data:st.level }
+          , Ok id ))
+    }
+  ;;
+
+  let peek_counter = { run = (fun st -> st, Ok st.counter) }
+  let enter_level = { run = (fun st -> { st with level = st.level + 1 }, Ok ()) }
+  let leave_level = { run = (fun st -> { st with level = st.level - 1 }, Ok ()) }
+  let current_level = { run = (fun st -> st, Ok st.level) }
+
+  let level_of id =
+    { run = (fun st -> st, Ok (Map.find st.levels id |> Option.value ~default:st.level)) }
+  ;;
+
+  let lower_level id lvl =
+    { run =
+        (fun st ->
+          let cur = Map.find st.levels id |> Option.value ~default:st.level in
+          { st with levels = Map.set st.levels ~key:id ~data:(min cur lvl) }, Ok ())
+    }
+  ;;
+
+  let run_infer m =
+    snd (run m { counter = 0; level = 0; levels = Map.empty (module Int) })
+  ;;
 end
 
 type fresh = int
@@ -120,7 +160,20 @@ end = struct
   let empty = Map.empty (module Int)
 
   let bind_var id ty =
-    if Type.occurs_check id ty then fail (`Occurs_check (id, ty)) else return (id, ty)
+    if Type.occurs_check id ty
+    then fail (`Occurs_check (id, ty))
+    else
+      (* vars of ty can't outlive id once bound to it, so lower their levels *)
+      let* lvl = level_of id in
+      let* () =
+        List.fold
+          (VarSet.elements (Type.free_type_vars ty))
+          ~init:(return ())
+          ~f:(fun acc v ->
+            let* () = acc in
+            lower_level v lvl)
+      in
+      return (id, ty)
   ;;
 
   let singleton id ty =
@@ -270,14 +323,18 @@ let instantiate_scheme (S (bs, t) : scheme) : ty InferState.t =
     (return t)
 ;;
 
-let generalize (env : TypeEnv.t) (ty : Type.t) : TypeScheme.t =
-  let free = VarSet.diff (Type.free_type_vars ty) (TypeEnv.free_type_vars env) in
-  S (free, ty)
-;;
-
-let generalize_recursive env ty x =
-  let env = TypeEnv.remove env x in
-  generalize env ty
+(* generalize vars deeper than the current level (no env scan, unlike plain HM) *)
+let generalize (ty : Type.t) : TypeScheme.t InferState.t =
+  let* cur = current_level in
+  let* gen =
+    VarSet.fold_left_m
+      (fun acc v ->
+         let* lv = level_of v in
+         return (if lv > cur then VarSet.add v acc else acc))
+      (Type.free_type_vars ty)
+      (return VarSet.empty)
+  in
+  return (S (gen, ty))
 ;;
 
 let rec ty_from_annotation = function
@@ -400,21 +457,25 @@ let infer_expression =
     | ExpLetIn (Rec, name, e1, e2) ->
       let* var_ty = fresh_var in
       let env_pre = TypeEnv.extend env (name, S (VarSet.empty, var_ty)) in
+      let* () = enter_level in
       let* s1, t1 = infer env_pre e1 in
       let* s2 = Subst.unify_types (Subst.apply_subst s1 var_ty) t1 in
       let* s3 = Subst.compose s1 s2 in
+      let* () = leave_level in
       let env_upd = TypeEnv.apply_subst s3 env in
       let t1' = Subst.apply_subst s3 t1 in
-      let scheme = generalize (TypeEnv.remove env_upd name) t1' in
+      let* scheme = generalize t1' in
       let env_rec = TypeEnv.extend env_upd (name, scheme) in
       let* s4, t2 = infer env_rec e2 in
       let* s5 = Subst.compose s3 s4 in
       return (s5, t2)
     | ExpLetIn (Notrec, pat_name, e1, e2) ->
       let pat = PatVar (pat_name, TypeUnknown) in
+      let* () = enter_level in
       let* s1, t1 = infer env e1 in
+      let* () = leave_level in
       let env' = TypeEnv.apply_subst s1 env in
-      let scheme = generalize env' t1 in
+      let* scheme = generalize (Subst.apply_subst s1 t1) in
       let* env_pat, t_pat = infer_pattern env' pat in
       let env_ext = TypeEnv.ext scheme env_pat pat in
       let* s_unify = Subst.unify_types t_pat t1 in
@@ -424,9 +485,11 @@ let infer_expression =
       let* s_final = Subst.compose s_all s2 in
       return (s_final, t2)
     | ExpLetPatIn (pat, e1, e2) ->
+      let* () = enter_level in
       let* s1, t1 = infer env e1 in
+      let* () = leave_level in
       let env' = TypeEnv.apply_subst s1 env in
-      let scheme = generalize env' t1 in
+      let* scheme = generalize (Subst.apply_subst s1 t1) in
       let* env_pat, t_pat = infer_pattern env' pat in
       let env_ext = TypeEnv.ext scheme env_pat pat in
       let* s_unify = Subst.unify_types t_pat t1 in
@@ -521,6 +584,7 @@ let infer_bindings env =
   let infer_let_rec env bindings =
     let* fresh_vars = freshen_rec_names bindings in
     let env_pre = extend_env_with_rec env fresh_vars in
+    let* () = enter_level in
     let* inferred =
       List.fold_left
         ~init:(return [])
@@ -544,22 +608,22 @@ let infer_bindings env =
           return s3)
         inferred
     in
+    let* () = leave_level in
     let env_subst = TypeEnv.apply_subst subst_final env in
-    let env_final =
-      List.fold_left
-        ~init:env_subst
-        ~f:(fun acc (name, _, t) ->
-          let t' = Subst.apply_subst subst_final t in
-          let scheme = generalize (TypeEnv.remove acc name) t' in
-          TypeEnv.extend acc (name, scheme))
-        inferred
-    in
-    return env_final
+    List.fold_left
+      ~init:(return env_subst)
+      ~f:(fun acc (name, _, t) ->
+        let* acc = acc in
+        let* scheme = generalize (Subst.apply_subst subst_final t) in
+        return (TypeEnv.extend acc (name, scheme)))
+      inferred
   in
   let infer_let_nonrec env pattern expr =
+    let* () = enter_level in
     let* s_expr, ty_expr = infer_expression env expr in
+    let* () = leave_level in
     let env_expr = TypeEnv.apply_subst s_expr env in
-    let scheme = generalize env_expr ty_expr in
+    let* scheme = generalize (Subst.apply_subst s_expr ty_expr) in
     let* env_pat, ty_pat = infer_pattern env_expr pattern in
     let env_ext = TypeEnv.ext scheme env_pat pattern in
     let* s_unify = Subst.unify_types ty_expr ty_pat in
@@ -577,13 +641,17 @@ let infer_bindings env =
 ;;
 
 let start_env =
-  let builtins = [ "print_int", arrow int_typ unit_typ ] in
-  let env0 = TypeEnv.empty in
-  let add_builtin env (name, ty) =
-    let scheme = generalize env ty in
-    TypeEnv.extend env (name, scheme)
+  let builtins =
+    [ "print_int", arrow int_typ unit_typ
+    ; "collect", arrow unit_typ unit_typ
+    ; "print_gc_status", arrow unit_typ unit_typ
+    ; "get_heap_start", arrow unit_typ int_typ
+    ; "get_heap_fin", arrow unit_typ int_typ
+    ]
   in
-  List.fold_left builtins ~init:env0 ~f:add_builtin
+  (* builtins are monomorphic, so their schemes bind no variables *)
+  List.fold_left builtins ~init:TypeEnv.empty ~f:(fun env (name, ty) ->
+    TypeEnv.extend env (name, S (VarSet.empty, ty)))
 ;;
 
 let infer_simple_expression expr =

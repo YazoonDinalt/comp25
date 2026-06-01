@@ -44,14 +44,19 @@ let () =
     Printf.eprintf "Parse error: %s\n" msg;
     exit 1
   | Ok stmts ->
-    let result =
-      match Anf.anf_program (Ll.ll_program (Cc.cc_program stmts)) with
-      | Error msg -> Error msg
-      | Ok prog -> Codegen.codegen_program prog output_file
-    in
-    (match result with
-     | Error msg ->
-       Printf.eprintf "Codegen error: %s\n" msg;
+    (match Inferencer.run_infer stmts with
+     | Error err ->
+       Format.eprintf "Type error: %a\n" Ty.pp_error_infer err;
        exit 1
-     | Ok () -> ())
+     | Ok _ ->
+       let result =
+         match Anf.anf_program (Ll.ll_program (Cc.cc_program stmts)) with
+         | Error msg -> Error msg
+         | Ok prog -> Codegen.codegen_program prog output_file
+       in
+       (match result with
+        | Error msg ->
+          Printf.eprintf "Codegen error: %s\n" msg;
+          exit 1
+        | Ok () -> ()))
 ;;

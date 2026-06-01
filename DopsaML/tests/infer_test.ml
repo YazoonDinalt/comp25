@@ -202,3 +202,94 @@ let%expect_test "test_unification_types" =
     {|
     Infer error. Typechecker error: unification failed on bool and int|}]
 ;;
+
+let%expect_test "tuple" =
+  pretty_printer_parse_and_infer "let p = (1, true)";
+  [%expect {| val p: (int * bool) |}]
+;;
+
+let%expect_test "tuple pattern" =
+  pretty_printer_parse_and_infer "let f p = let (a, b) = p in a";
+  [%expect {| val f: ('a * 'b) -> 'a |}]
+;;
+
+let%expect_test "cons pattern" =
+  pretty_printer_parse_and_infer "let hd l = let (h :: t) = l in h";
+  [%expect {| Parsing error. : no more choices |}]
+;;
+
+let%expect_test "let in body" =
+  pretty_printer_parse_and_infer "let f x = let y = x + 1 in y * 2";
+  [%expect {| val f: int -> int |}]
+;;
+
+let%expect_test "occurs check" =
+  pretty_printer_parse_and_infer "let f x = x x";
+  [%expect
+    {| Infer error. Occurs check failed. Type variable '0 occurs inside 'a -> 'b. |}]
+;;
+
+let%expect_test "list of functions" =
+  pretty_printer_parse_and_infer "let l = [ fun x -> x ]";
+  [%expect {| Parsing error. : no more choices |}]
+;;
+
+let%expect_test "tuple of function and int" =
+  pretty_printer_parse_and_infer "let p = (fun x -> x, 1)";
+  [%expect {| val p: ('a -> 'a * int) |}]
+;;
+
+let%expect_test "level polymorphism: id at two types" =
+  pretty_printer_parse_and_infer "let main = let id x = x in (id 1, id true)";
+  [%expect {| val main: (int * bool) |}]
+;;
+
+let%expect_test "rec binding must be a name" =
+  pretty_printer_parse_and_infer "let rec (a, b) = (1, 2)";
+  [%expect {| Infer error. Typechecker error: empty pattern |}]
+;;
+
+let%expect_test "composition has nested arrows" =
+  pretty_printer_parse_and_infer "let app f g x = f (g x)";
+  [%expect {| val app: ('c -> 'b) -> ('a -> 'c) -> 'a -> 'b |}]
+;;
+
+let%expect_test "argument is a function (nested-left arrow)" =
+  pretty_printer_parse_and_infer "let app f = f 0";
+  [%expect {| val app: (int -> 'a) -> 'a |}]
+;;
+
+let%expect_test "list of tuples" =
+  pretty_printer_parse_and_infer "let l = [ (1, 2) ]";
+  [%expect {| val l: ((int * int)) list |}]
+;;
+
+let%expect_test "expression annotation" =
+  pretty_printer_parse_and_infer "let g x = (x : int)";
+  [%expect {| val g: int -> int |}]
+;;
+
+let%expect_test "application annotation" =
+  pretty_printer_parse_and_infer "let r f = (f 1 : int)";
+  [%expect {| val r: (int -> int) -> int |}]
+;;
+
+let%expect_test "wildcard in pattern" =
+  pretty_printer_parse_and_infer "let f x = let (_, b) = x in b";
+  [%expect {| val f: ('a * 'b) -> 'b |}]
+;;
+
+let%expect_test "constant in pattern" =
+  pretty_printer_parse_and_infer "let f t = let (1, y) = t in y";
+  [%expect {| val f: (int * 'a) -> 'a |}]
+;;
+
+let%expect_test "soundness: captured param is not over-generalized" =
+  pretty_printer_parse_and_infer "let f x = let g = fun y -> x in (g 1, g 2)";
+  [%expect {| val f: 'a -> ('a * 'a) |}]
+;;
+
+let%expect_test "soundness: inner let does not generalize a param" =
+  pretty_printer_parse_and_infer "let f x = let id y = y in (id x, x)";
+  [%expect {| val f: 'a -> ('a * 'a) |}]
+;;
