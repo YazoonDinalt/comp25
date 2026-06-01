@@ -7,9 +7,15 @@
 (source
  (github Kakadu/comp24))
 
-(authors "FIXME Vasya Pupkin" "FIXME Pupkin Vasya")
+(authors
+ "Vitaliy Dyachkov <vitaliy.dyach@gmail.com>"
+ "Ruslan Nafikov <ruslan.nafikov.05@bk.ru>"
+ "Vladislav Shalnev <vaifaer@gmail.com>")
 
-(maintainers "FIXME Vasya Pupkin" "FIXME Pupkin Vasya")
+(maintainers
+ "Vitaliy Dyachkov <vitaliy.dyach@gmail.com>"
+ "Ruslan Nafikov <ruslan.nafikov.05@bk.ru>"
+ "Vladislav Shalnev <vaifaer@gmail.com>")
 
 (license "LGPL-3.0-or-later WITH OCaml-LGPL-linking-exception")
 
