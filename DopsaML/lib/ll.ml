@@ -23,6 +23,20 @@ let rec ll_expr counter = function
     let e1', bs1, c1 = ll_expr counter e1 in
     let e2', bs2, c2 = ll_expr c1 e2 in
     ExpLetIn (rf, name, e1', e2'), bs1 @ bs2, c2
+  | ExpLetPatIn (pat, e1, e2) ->
+    let e1', bs1, c1 = ll_expr counter e1 in
+    let e2', bs2, c2 = ll_expr c1 e2 in
+    ExpLetPatIn (pat, e1', e2'), bs1 @ bs2, c2
+  | ExpTuple es ->
+    let es', bs, c =
+      List.fold_left
+        (fun (acc, bs, c) e ->
+           let e', bs', c' = ll_expr c e in
+           acc @ [ e' ], bs @ bs', c')
+        ([], [], counter)
+        es
+    in
+    ExpTuple es', bs, c
   | ExpFun _ as lambda ->
     let name = Printf.sprintf "ll%d" counter in
     let lifted, inner_bs, c1 = ll_fun (counter + 1) lambda in

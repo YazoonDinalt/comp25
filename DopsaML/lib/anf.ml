@@ -17,6 +17,8 @@ type cexpr =
   | CBinop of binary_op * imm * imm
   | CApp of string * imm list (* call of a named function/closure *)
   | CIf of imm * aexpr * aexpr
+  | CTuple of imm list
+  | CField of imm * int (* i-th field of a tuple *)
 
 and aexpr =
   | ALet of string * cexpr * aexpr
@@ -52,6 +54,33 @@ let rec unwrap_params = function
     let params, inner = unwrap_params rest in
     name :: params, inner
   | e -> [], e
+;;
+
+(* bind a pattern's pieces (the value is v) around rest *)
+let rec bind_pat pat v rest =
+  match pat with
+  | PatVar (x, _) -> return (ALet (x, CImm v, rest))
+  | PatWild | PatConst _ -> return rest
+  | PatTuple ps ->
+    let rec go i = function
+      | [] -> return rest
+      | p :: tl ->
+        let* inner = go (i + 1) tl in
+        bind_field p v i inner
+    in
+    go 0 ps
+  | PatCon _ -> fail "ANF: unsupported pattern"
+
+(* bind sub-pattern p = i-th field of v, around rest *)
+and bind_field p v i rest =
+  match p with
+  | PatVar (x, _) -> return (ALet (x, CField (v, i), rest))
+  | PatWild | PatConst _ -> return rest
+  | PatTuple _ ->
+    let* t = fresh in
+    let* inner = bind_pat p (ImmVar t) rest in
+    return (ALet (t, CField (v, i), inner))
+  | PatCon _ -> fail "ANF: unsupported pattern"
 ;;
 
 (* e -> its value as an immediate, passed to k *)
@@ -96,6 +125,13 @@ and anf_cexpr e (k : cexpr -> aexpr m) : aexpr m =
     anf_cexpr e1 (fun c1 ->
       let* rest = anf_cexpr e2 k in
       return (ALet (name, c1, rest)))
+  | ExpLetPatIn (pat, e1, e2) ->
+    anf_cexpr e1 (fun c1 ->
+      let* t = fresh in
+      let* rest = anf_cexpr e2 k in
+      let* bound = bind_pat pat (ImmVar t) rest in
+      return (ALet (t, c1, bound)))
+  | ExpTuple es -> anf_imm_list es (fun imms -> k (CTuple imms))
   | ExpApp _ ->
     let rec collect acc = function
       | ExpApp (f, arg, _) -> collect (arg :: acc) f

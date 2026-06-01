@@ -18,10 +18,11 @@ int64_t print_int(int64_t tagged) {
 
 typedef int64_t (*func_t)();
 
-/* closure layout is fixed, the asm trampoline below depends on the offsets.
-   header is LIVE, or the new address once gc copied the object. */
-#define LIVE 1
+/* header of a live object is its tag; after a copy it holds the new address */
+#define CLOSURE 1
+#define TUPLE 2
 
+/* closure layout is fixed, the asm trampoline below depends on the offsets */
 typedef struct {
     int64_t header;
     func_t func;
@@ -30,8 +31,16 @@ typedef struct {
     int64_t args[];
 } closure_t;
 
-static int64_t closure_bytes(closure_t *c) {
-    return (int64_t)sizeof(closure_t) + c->n_applied * 8;
+typedef struct {
+    int64_t header;
+    int64_t size;
+    int64_t fields[];
+} tuple_t;
+
+static int64_t obj_bytes(int64_t *obj) {
+    if (*obj == CLOSURE)
+        return (int64_t)sizeof(closure_t) + ((closure_t *)obj)->n_applied * 8;
+    return (int64_t)sizeof(tuple_t) + ((tuple_t *)obj)->size * 8;
 }
 
 /* copying gc: two banks, bump allocation, Cheney */
@@ -89,16 +98,22 @@ static void *gc_alloc(int64_t bytes) {
 /* move obj to the new bank (if not yet), leave a forwarding pointer, return
    its new address. children are handled by the scan loop below */
 static int64_t forward(int64_t ptr) {
-    closure_t *obj = (closure_t *)(uintptr_t)ptr;
-    if (obj->header != LIVE) return obj->header; /* already copied */
-    int64_t bytes = closure_bytes(obj);
-    closure_t *dst = (closure_t *)gc.free;
+    int64_t *obj = (int64_t *)(uintptr_t)ptr;
+    if (*obj != CLOSURE && *obj != TUPLE) return *obj; /* already copied */
+    int64_t bytes = obj_bytes(obj);
+    int64_t *dst = (int64_t *)gc.free;
     gc.free += bytes;
     gc.total_allocated += bytes;
-    memcpy(dst, obj, bytes);
-    dst->header = LIVE;
-    obj->header = (int64_t)(uintptr_t)dst;
+    memcpy(dst, obj, bytes); /* tag is copied along */
+    *obj = (int64_t)(uintptr_t)dst;
     return (int64_t)(uintptr_t)dst;
+}
+
+/* forward an arg/field if it points into the old bank */
+static int64_t forward_child(int64_t v, uint8_t *old_start, uint8_t *old_free) {
+    if (!is_int(v) && (uint8_t *)v >= old_start && (uint8_t *)v < old_free)
+        return forward(v);
+    return v;
 }
 
 void gc_collect(void) {
@@ -123,31 +138,35 @@ void gc_collect(void) {
         int64_t w = *slot;
         if (!is_int(w) && (w & 7) == 0 && (uint8_t *)w >= old_start
             && (uint8_t *)w < old_free) {
-            closure_t *obj = (closure_t *)(uintptr_t)w;
-            if (obj->header == LIVE
-                || ((uint8_t *)obj->header >= gc.from_start
-                    && (uint8_t *)obj->header < gc.from_start + BANK_SIZE))
+            int64_t h = *(int64_t *)(uintptr_t)w;
+            if (h == CLOSURE || h == TUPLE
+                || ((uint8_t *)h >= gc.from_start
+                    && (uint8_t *)h < gc.from_start + BANK_SIZE))
                 *slot = forward(w);
         }
     }
 
-    /* now walk the copied objects and forward their args too */
+    /* now walk the copied objects and forward what they point to */
     uint8_t *scan = gc.from_start;
     while (scan < gc.free) {
-        closure_t *obj = (closure_t *)scan;
-        for (int64_t i = 0; i < obj->n_applied; i++) {
-            int64_t a = obj->args[i];
-            if (!is_int(a) && (uint8_t *)a >= old_start && (uint8_t *)a < old_free)
-                obj->args[i] = forward(a);
+        int64_t *obj = (int64_t *)scan;
+        if (*obj == CLOSURE) {
+            closure_t *c = (closure_t *)obj;
+            for (int64_t i = 0; i < c->n_applied; i++)
+                c->args[i] = forward_child(c->args[i], old_start, old_free);
+        } else {
+            tuple_t *t = (tuple_t *)obj;
+            for (int64_t i = 0; i < t->size; i++)
+                t->fields[i] = forward_child(t->fields[i], old_start, old_free);
         }
-        scan += closure_bytes(obj);
+        scan += obj_bytes(obj);
     }
     gc.collections++;
 }
 
 int64_t make_closure(int64_t fptr, int32_t arity) {
     closure_t *c = gc_alloc(sizeof(closure_t));
-    c->header = LIVE;
+    c->header = CLOSURE;
     c->func = (func_t)(uintptr_t)fptr;
     c->arity = arity;
     c->n_applied = 0;
@@ -162,7 +181,7 @@ int64_t apply(int64_t closure_val, int64_t arg) {
     /* gc_alloc might collect here; old_c and arg are on the stack so the scan
        fixes them up, safe to use after */
     closure_t *new_c = gc_alloc(sizeof(closure_t) + new_n * 8);
-    new_c->header = LIVE;
+    new_c->header = CLOSURE;
     new_c->func = old_c->func;
     new_c->arity = old_c->arity;
     new_c->n_applied = new_n;
@@ -170,6 +189,20 @@ int64_t apply(int64_t closure_val, int64_t arg) {
     new_c->args[old_c->n_applied] = arg;
     if (new_n == new_c->arity) return call_closure(new_c);
     return (int64_t)(uintptr_t)new_c;
+}
+
+int64_t create_tuple(int64_t size, int64_t *init) {
+    /* init points to a stack array of the fields; safe across a collection
+       (it is a root) */
+    tuple_t *t = gc_alloc(sizeof(tuple_t) + size * 8);
+    t->header = TUPLE;
+    t->size = size;
+    memcpy(t->fields, init, size * 8);
+    return (int64_t)(uintptr_t)t;
+}
+
+int64_t field(int64_t tuple, int64_t i) {
+    return ((tuple_t *)(uintptr_t)tuple)->fields[i >> 1];
 }
 
 /* gc functions callable from the language, the unit arg is ignored */

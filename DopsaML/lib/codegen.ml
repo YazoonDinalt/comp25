@@ -40,10 +40,13 @@ let retag v =
 ;;
 
 let void_t = Llvm.void_type context
+let ptr_t = Llvm.pointer_type context
 let make_closure_ft = Llvm.function_type i64_t [| i64_t; i32_t |]
 let apply_ft = Llvm.function_type i64_t [| i64_t; i64_t |]
 let builtin_ft = Llvm.function_type i64_t [| i64_t |]
 let gc_init_ft = Llvm.function_type void_t [||]
+let create_tuple_ft = Llvm.function_type i64_t [| i64_t; ptr_t |]
+let field_ft = Llvm.function_type i64_t [| i64_t; i64_t |]
 
 type env = (string, Llvm.llvalue) Hashtbl.t
 
@@ -155,6 +158,22 @@ let rec codegen_cexpr arities (env : env) (func : Llvm.llvalue) = function
         let ft = Llvm.function_type i64_t (Array.make arity i64_t) in
         Ok (Llvm.build_call ft callee (Array.of_list argvals) "call" builder)
       else apply_chain (build_closure_of f arity) argvals)
+  | CTuple fields ->
+    let* vals = map_result (codegen_imm arities env) fields in
+    let n = List.length vals in
+    let arr = Llvm.build_array_alloca i64_t (i64v n) "tuple_fields" builder in
+    List.iteri
+      (fun i v ->
+         let gep = Llvm.build_gep i64_t arr [| i64v i |] "fp" builder in
+         let (_ : Llvm.llvalue) = Llvm.build_store v gep builder in
+         ())
+      vals;
+    let* ct = lookup_func "create_tuple" in
+    Ok (Llvm.build_call create_tuple_ft ct [| i64v n; arr |] "tuple" builder)
+  | CField (v, i) ->
+    let* tv = codegen_imm arities env v in
+    let* fld = lookup_func "field" in
+    Ok (Llvm.build_call field_ft fld [| tv; tag_int i |] "field" builder)
   | CIf (cond, then_a, else_a) ->
     let* cond_val = codegen_imm arities env cond in
     let cond_bool = ensure_i1 cond_val in
@@ -257,6 +276,8 @@ let codegen_program (prog : aprogram) output_file =
   let _ = Llvm.declare_function "make_closure" make_closure_ft the_module in
   let _ = Llvm.declare_function "apply" apply_ft the_module in
   let _ = Llvm.declare_function "gc_init" gc_init_ft the_module in
+  let _ = Llvm.declare_function "create_tuple" create_tuple_ft the_module in
+  let _ = Llvm.declare_function "field" field_ft the_module in
   List.iter
     (fun (f : afunc) ->
        if f.name <> "main"
