@@ -46,6 +46,7 @@ let builtin_ft = Llvm.function_type i64_t [| i64_t |]
 let gc_init_ft = Llvm.function_type void_t [||]
 let create_tuple_ft = Llvm.function_type i64_t [| i64_t; ptr_t |]
 let field_ft = Llvm.function_type i64_t [| i64_t; i64_t |]
+let register_root_ft = Llvm.function_type void_t [| ptr_t |]
 
 type env = (string, Llvm.llvalue) Hashtbl.t
 
@@ -98,11 +99,26 @@ let arity_of arities name =
   | None -> 1
 ;;
 
+(* top-level values (no parameters) are stored in globals, marked here by a
+   negative arity *)
+let is_caf arities name =
+  match StringMap.find_opt name arities with
+  | Some a -> a < 0
+  | None -> false
+;;
+
+let load_global md name =
+  match Llvm.lookup_global name md with
+  | Some g -> Ok (Llvm.build_load i64_t g name builder)
+  | None -> Error (Printf.sprintf "Unknown global: %s" name)
+;;
+
 let codegen_imm md arities (env : env) = function
   | ImmInt n -> Ok (tag_int n)
   | ImmBool b -> Ok (i64v (if b then 3 else 1))
   | ImmUnit -> Ok (i64v 1)
   | ImmVar x when Hashtbl.mem env x -> env_get env x
+  | ImmVar x when is_caf arities x -> load_global md x
   (* a top-level function used as a value -> closure *)
   | ImmVar x -> build_closure_of md x (arity_of arities x)
 ;;
@@ -148,6 +164,8 @@ let rec codegen_cexpr md arities (env : env) (func : Llvm.llvalue) = function
     let* argvals = map_result (codegen_imm md arities env) args in
     if Hashtbl.mem env f
     then apply_chain md (env_get env f) argvals (* local closure *)
+    else if is_caf arities f
+    then apply_chain md (load_global md f) argvals (* top-level value, applied *)
     else (
       let arity = arity_of arities f in
       if List.length args = arity
@@ -201,7 +219,13 @@ and codegen_aexpr md arities (env : env) (func : Llvm.llvalue) = function
 
 let collect_arities (prog : aprogram) =
   List.fold_left
-    (fun m (f : afunc) -> StringMap.add f.name (List.length f.params) m)
+    (fun m (f : afunc) ->
+       let arity =
+         if f.params = [] && not (String.equal f.name "main")
+         then -1 (* a top-level value, not a function *)
+         else List.length f.params
+       in
+       StringMap.add f.name arity m)
     (List.fold_left (fun m name -> StringMap.add name 1 m) StringMap.empty builtins)
     prog
 ;;
@@ -228,13 +252,33 @@ let codegen_func md arities (f : afunc) =
   Ok fn
 ;;
 
-let codegen_main md arities (f : afunc) =
+(* run a value's body, store it in its global, register the global as a root *)
+let codegen_caf md arities fn (f : afunc) =
+  let* v = codegen_aexpr md arities (new_env ()) fn f.body in
+  match Llvm.lookup_global f.name md with
+  | None -> Error (Printf.sprintf "Unknown global: %s" f.name)
+  | Some g ->
+    let _ = Llvm.build_store v g builder in
+    let* rgr = lookup_func md "register_global_root" in
+    let _ = Llvm.build_call register_root_ft rgr [| g |] "" builder in
+    Ok ()
+;;
+
+let codegen_main md arities cafs (f : afunc) =
   let ft = Llvm.function_type i32_t [||] in
   let fn = Llvm.define_function "main" ft md in
   let entry_bb = Llvm.entry_block fn in
   Llvm.position_at_end entry_bb builder;
   let* gc_init_fn = lookup_func md "gc_init" in
   let _ = Llvm.build_call gc_init_ft gc_init_fn [||] "" builder in
+  let* () =
+    List.fold_left
+      (fun acc caf ->
+         let* () = acc in
+         codegen_caf md arities fn caf)
+      (Ok ())
+      cafs
+  in
   let env = new_env () in
   let* result = codegen_aexpr md arities env fn f.body in
   let untagged = Llvm.build_ashr result (i64v 1) "untag" builder in
@@ -243,10 +287,10 @@ let codegen_main md arities (f : afunc) =
   Ok fn
 ;;
 
-let codegen_cfunc md arities (f : afunc) =
+let codegen_cfunc md arities cafs (f : afunc) =
   if f.name = "main"
   then
-    let* _ = codegen_main md arities f in
+    let* _ = codegen_main md arities cafs f in
     Ok ()
   else if f.is_rec
   then (
@@ -268,6 +312,7 @@ let codegen_cfunc md arities (f : afunc) =
 let codegen_program (prog : aprogram) output_file =
   let md = Llvm.create_module context "DopsaML" in
   let arities = collect_arities prog in
+  let cafs = List.filter (fun (f : afunc) -> is_caf arities f.name) prog in
   List.iter
     (fun name ->
        let (_ : Llvm.llvalue) = Llvm.declare_function name builtin_ft md in
@@ -278,9 +323,17 @@ let codegen_program (prog : aprogram) output_file =
   let _ = Llvm.declare_function "gc_init" gc_init_ft md in
   let _ = Llvm.declare_function "create_tuple" create_tuple_ft md in
   let _ = Llvm.declare_function "field" field_ft md in
+  let _ = Llvm.declare_function "register_global_root" register_root_ft md in
+  (* one global per top-level value *)
   List.iter
     (fun (f : afunc) ->
-       if f.name <> "main"
+       let (_ : Llvm.llvalue) = Llvm.define_global f.name (i64v 0) md in
+       ())
+    cafs;
+  (* forward-declare the real functions so mutual recursion resolves *)
+  List.iter
+    (fun (f : afunc) ->
+       if f.name <> "main" && not (is_caf arities f.name)
        then (
          let n = List.length f.params in
          let ft = Llvm.function_type i64_t (Array.make n i64_t) in
@@ -294,7 +347,8 @@ let codegen_program (prog : aprogram) output_file =
     List.fold_left
       (fun acc f ->
          let* () = acc in
-         codegen_cfunc md arities f)
+         (* top-level values are emitted inside main, not as functions *)
+         if is_caf arities f.name then Ok () else codegen_cfunc md arities cafs f)
       (Ok ())
       prog
   in

@@ -147,18 +147,27 @@ and anf_cexpr e (k : cexpr -> aexpr m) : aexpr m =
 (* tail position: e's value becomes the aexpr's value *)
 and anf_aexpr e : aexpr m = anf_cexpr e (fun c -> return (ACExpr c))
 
+(* one binding may define several names (let rec .. and ..) *)
 let anf_func = function
-  | Let (rf, [ (PatVar (name, _), body) ]) ->
-    let params, inner = unwrap_params body in
+  | Let (rf, pats) ->
     let is_rec =
       match rf with
       | Rec -> true
       | Notrec -> false
     in
-    (match run (anf_aexpr inner) with
-     | Ok body -> Ok (Some { name; is_rec; params; body })
-     | Error e -> Error e)
-  | _ -> Ok None
+    List.fold_left
+      (fun acc (pat, body) ->
+         match acc, pat with
+         | (Error _ as e), _ -> e
+         | Ok fs, PatVar (name, _) ->
+           let params, inner = unwrap_params body in
+           (match run (anf_aexpr inner) with
+            | Ok body -> Ok (fs @ [ { name; is_rec; params; body } ])
+            | Error e -> Error e)
+         | Ok fs, _ -> Ok fs)
+      (Ok [])
+      pats
+  | _ -> Ok []
 ;;
 
 let anf_program stmts =
@@ -169,8 +178,7 @@ let anf_program stmts =
        | Ok funcs ->
          (match anf_func stmt with
           | Error _ as e -> e
-          | Ok None -> Ok funcs
-          | Ok (Some f) -> Ok (funcs @ [ f ])))
+          | Ok more -> Ok (funcs @ more)))
     (Ok [])
     stmts
 ;;

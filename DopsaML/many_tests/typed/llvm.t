@@ -14,3 +14,4 @@
   $ ../../bin/DopsaML.exe manytests/typed/010fibcps_ll.ml -o /dev/null
   $ ../../bin/DopsaML.exe manytests/typed/012faccps.ml -o /dev/null
   $ ../../bin/DopsaML.exe manytests/typed/012fibcps.ml -o /dev/null
+  $ ../../bin/DopsaML.exe manytests/typed/015tuples.ml -o /dev/null

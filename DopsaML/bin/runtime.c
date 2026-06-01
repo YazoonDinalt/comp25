@@ -58,6 +58,15 @@ static struct {
 
 static int64_t *stack_bottom;
 
+/* top-level value bindings live in globals; they are roots too */
+#define MAX_GLOBAL_ROOTS 256
+static int64_t *global_roots[MAX_GLOBAL_ROOTS];
+static int global_root_count = 0;
+
+void register_global_root(int64_t *slot) {
+    if (global_root_count < MAX_GLOBAL_ROOTS) global_roots[global_root_count++] = slot;
+}
+
 void gc_init(void) {
     gc.from_start = malloc(BANK_SIZE);
     gc.to_start = malloc(BANK_SIZE);
@@ -116,6 +125,18 @@ static int64_t forward_child(int64_t v, uint8_t *old_start, uint8_t *old_free) {
     return v;
 }
 
+/* forward one root slot (stack cell or global) and update it in place */
+static void scan_root(int64_t *slot, uint8_t *old_start, uint8_t *old_free) {
+    int64_t w = *slot;
+    if (!is_int(w) && (w & 7) == 0 && (uint8_t *)w >= old_start
+        && (uint8_t *)w < old_free) {
+        int64_t h = *(int64_t *)(uintptr_t)w;
+        if (h == CLOSURE || h == TUPLE
+            || ((uint8_t *)h >= gc.from_start && (uint8_t *)h < gc.from_start + BANK_SIZE))
+            *slot = forward(w);
+    }
+}
+
 void gc_collect(void) {
     /* setjmp dumps the callee-saved regs onto the stack, otherwise a root
        sitting only in a register would be missed by the scan */
@@ -132,19 +153,11 @@ void gc_collect(void) {
     gc.free = gc.from_start;
     gc.bank_idx = 1 - gc.bank_idx;
 
-    /* roots: walk the stack, forward anything that looks like a pointer into
-       the old bank and fix up the slot */
-    for (int64_t *slot = stack_bottom; slot >= sp; slot--) {
-        int64_t w = *slot;
-        if (!is_int(w) && (w & 7) == 0 && (uint8_t *)w >= old_start
-            && (uint8_t *)w < old_free) {
-            int64_t h = *(int64_t *)(uintptr_t)w;
-            if (h == CLOSURE || h == TUPLE
-                || ((uint8_t *)h >= gc.from_start
-                    && (uint8_t *)h < gc.from_start + BANK_SIZE))
-                *slot = forward(w);
-        }
-    }
+    /* roots: the native stack and the registered globals */
+    for (int64_t *slot = stack_bottom; slot >= sp; slot--)
+        scan_root(slot, old_start, old_free);
+    for (int i = 0; i < global_root_count; i++)
+        scan_root(global_roots[i], old_start, old_free);
 
     /* now walk the copied objects and forward what they point to */
     uint8_t *scan = gc.from_start;

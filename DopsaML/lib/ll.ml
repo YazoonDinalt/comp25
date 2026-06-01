@@ -51,12 +51,19 @@ and ll_fun counter = function
 ;;
 
 let ll_binding counter = function
-  | Let (rf, [ (pat, body) ]) ->
-    let body', new_binds, counter' = ll_fun counter body in
-    let lifted =
-      List.map (fun (n, e) -> Let (Notrec, [ PatVar (n, TypeUnknown), e ])) new_binds
+  | Let (rf, pats) ->
+    let pats', lifted, counter' =
+      List.fold_left
+        (fun (ps, lf, c) (pat, body) ->
+           let body', binds, c' = ll_fun c body in
+           ps @ [ pat, body' ], lf @ binds, c')
+        ([], [], counter)
+        pats
     in
-    lifted @ [ Let (rf, [ pat, body' ]) ], counter'
+    let lifted =
+      List.map (fun (n, e) -> Let (Notrec, [ PatVar (n, TypeUnknown), e ])) lifted
+    in
+    lifted @ [ Let (rf, pats') ], counter'
   | b -> [ b ], counter
 ;;
 
